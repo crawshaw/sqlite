@@ -26,6 +26,8 @@ package sqlite
 // #cgo CFLAGS: -DSQLITE_ENABLE_PREUPDATE_HOOK
 // #cgo CFLAGS: -DSQLITE_USE_ALLOCA
 // #cgo CFLAGS: -DSQLITE_ENABLE_COLUMN_METADATA
+// #cgo darwin LDFLAGS: -Wl,-undefined,suppress -Wl,-flat_namespace
+// #cgo linux LDFLAGS: -Wl,--unresolved-symbols=ignore-in-object-files
 // #cgo windows LDFLAGS: -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic
 // #cgo linux LDFLAGS: -ldl -lm
 // #cgo linux CFLAGS: -std=c99

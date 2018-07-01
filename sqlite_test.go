@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	"crawshaw.io/sqlite"
+	_ "crawshaw.io/sqlite/all"
 	"crawshaw.io/sqlite/sqliteutil"
 )
 
