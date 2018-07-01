@@ -335,7 +335,7 @@ func (conn *Conn) prepare(query string, flags C.uint) (*Stmt, int, error) {
 	cquery := C.CString(query)
 	defer C.free(unsafe.Pointer(cquery))
 	var ctrailing *C.char
-	res := C.sqlite3_prepare_v3(conn.conn, cquery, -1, flags, &stmt.stmt, &ctrailing)
+	res := C.sqlite3_prepare_v2(conn.conn, cquery, -1, &stmt.stmt, &ctrailing)
 	if err := conn.extreserr("Conn.Prepare", query, res); err != nil {
 		return nil, 0, err
 	}
