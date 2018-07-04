@@ -24,8 +24,8 @@ import (
 	"testing"
 
 	"crawshaw.io/sqlite"
-	_ "crawshaw.io/sqlite/all"
 	"crawshaw.io/sqlite/sqliteutil"
+	_ "crawshaw.io/sqlite/static"
 )
 
 func TestConn(t *testing.T) {

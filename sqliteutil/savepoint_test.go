@@ -21,7 +21,7 @@ import (
 	"testing"
 
 	"crawshaw.io/sqlite"
-	_ "crawshaw.io/sqlite/all"
+	_ "crawshaw.io/sqlite/static"
 )
 
 func TestExec(t *testing.T) {
