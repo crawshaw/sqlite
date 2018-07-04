@@ -12,8 +12,12 @@
 // ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 // OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
-package sqlite
+package sqlsession
 
+// #cgo CFLAGS: -DSQLITE_ENABLE_SESSION
+// #cgo darwin LDFLAGS: -Wl,-undefined,suppress -flat_namespace
+// #cgo linux LDFLAGS: -Wl,--unresolved-symbols=ignore-in-object-files
+//
 // #include <sqlite3.h>
 // #include <stdlib.h>
 //
@@ -27,6 +31,8 @@ import (
 	"runtime"
 	"sync"
 	"unsafe"
+
+	"crawshaw.io/sqlite"
 )
 
 // A Session tracks database changes made by a Conn.
@@ -38,10 +44,12 @@ type Session struct {
 	ptr *C.sqlite3_session
 }
 
+var cmain = C.CString("main")
+
 // CreateSession creates a new session object.
 // If db is "", then a default of "main" is used.
 // https://www.sqlite.org/session/sqlite3session_create.html
-func (conn *Conn) CreateSession(db string) (*Session, error) {
+func CreateSession(conn *sqlite.Conn, db string) (*Session, error) {
 	var cdb *C.char
 	if db == "" || db == "main" {
 		cdb = cmain
@@ -50,8 +58,9 @@ func (conn *Conn) CreateSession(db string) (*Session, error) {
 		defer C.free(unsafe.Pointer(cdb))
 	}
 	s := &Session{}
-	res := C.sqlite3session_create(conn.conn, cdb, &s.ptr)
-	if err := conn.reserr("Conn.CreateSession", db, res); err != nil {
+	connPtr := (*C.sqlite3)(unsafe.Pointer(conn.Ptr()))
+	res := C.sqlite3session_create(connPtr, cdb, &s.ptr)
+	if err := reserr("Conn.CreateSession", db, "", res); err != nil {
 		return nil, err
 	}
 	runtime.SetFinalizer(s, func(s *Session) {
@@ -143,7 +152,7 @@ func (s *Session) Patchset(w io.Writer) error {
 // documentation for full details.
 //
 // https://www.sqlite.org/session/sqlite3changeset_apply.html
-func (conn *Conn) ChangesetApply(r io.Reader, filterFn func(tableName string) bool, conflictFn func(ConflictType, ChangesetIter) ConflictAction) error {
+func ChangesetApply(conn *sqlite.Conn, r io.Reader, filterFn func(tableName string) bool, conflictFn func(ConflictType, ChangesetIter) ConflictAction) error {
 	xIn := newStrm(nil, r)
 	x := &xapply{
 		conn:       conn,
@@ -165,8 +174,10 @@ func (conn *Conn) ChangesetApply(r io.Reader, filterFn func(tableName string) bo
 		conflictTramp = (*[0]byte)(C.xapply_conflict_tramp)
 	}
 
+	connPtr := (*C.sqlite3)(unsafe.Pointer(conn.Ptr()))
+
 	pCtx := unsafe.Pointer(uintptr(x.id))
-	res := C.sqlite3changeset_apply_strm(conn.conn, (*[0]byte)(C.strm_r_tramp), xIn.cptr(), filterTramp, conflictTramp, pCtx)
+	res := C.sqlite3changeset_apply_strm(connPtr, (*[0]byte)(C.strm_r_tramp), xIn.cptr(), filterTramp, conflictTramp, pCtx)
 
 	xapplys.mu.Lock()
 	delete(xapplys.m, x.id)
@@ -174,7 +185,7 @@ func (conn *Conn) ChangesetApply(r io.Reader, filterFn func(tableName string) bo
 
 	xIn.free()
 
-	return conn.reserr("Conn.ChangesetApply", "", res)
+	return reserr("Conn.ChangesetApply", "", "", res)
 }
 
 // ChangesetInvert inverts a changeset.
@@ -268,22 +279,26 @@ func (iter ChangesetIter) Finalize() error {
 // Old obtains old row values from an iterator.
 //
 // https://www.sqlite.org/session/sqlite3changeset_old.html
-func (iter ChangesetIter) Old(col int) (v Value, err error) {
-	res := C.sqlite3changeset_old(iter.ptr, C.int(col), &v.ptr)
+func (iter ChangesetIter) Old(col int) (v sqlite.Value, err error) {
+	var cval *C.sqlite3_value
+	res := C.sqlite3changeset_old(iter.ptr, C.int(col), &cval)
 	if err := reserr("ChangesetIter.Old", "", "", res); err != nil {
-		return Value{}, err
+		return sqlite.Value{}, err
 	}
+	v.SetCPtr((*uintptr)(unsafe.Pointer(cval)))
 	return v, nil
 }
 
 // New obtains new row values from an iterator.
 //
 // https://www.sqlite.org/session/sqlite3changeset_new.html
-func (iter ChangesetIter) New(col int) (v Value, err error) {
-	res := C.sqlite3changeset_new(iter.ptr, C.int(col), &v.ptr)
+func (iter ChangesetIter) New(col int) (v sqlite.Value, err error) {
+	var cval *C.sqlite3_value
+	res := C.sqlite3changeset_new(iter.ptr, C.int(col), &cval)
 	if err := reserr("ChangesetIter.New", "", "", res); err != nil {
-		return Value{}, err
+		return sqlite.Value{}, err
 	}
+	v.SetCPtr((*uintptr)(unsafe.Pointer(cval)))
 	return v, nil
 }
 
@@ -291,11 +306,13 @@ func (iter ChangesetIter) New(col int) (v Value, err error) {
 // Only use this in an iterator passed to a ChangesetApply conflictFn.
 //
 // https://www.sqlite.org/session/sqlite3changeset_conflict.html
-func (iter ChangesetIter) Conflict(col int) (v Value, err error) {
-	res := C.sqlite3changeset_conflict(iter.ptr, C.int(col), &v.ptr)
+func (iter ChangesetIter) Conflict(col int) (v sqlite.Value, err error) {
+	var cval *C.sqlite3_value
+	res := C.sqlite3changeset_conflict(iter.ptr, C.int(col), &cval)
 	if err := reserr("ChangesetIter.Conflict", "", "", res); err != nil {
-		return Value{}, err
+		return sqlite.Value{}, err
 	}
+	v.SetCPtr((*uintptr)(unsafe.Pointer(cval)))
 	return v, nil
 }
 
@@ -529,7 +546,7 @@ func strm_w_tramp(pOut unsafe.Pointer, pData *C.char, n C.int) C.int {
 		b = b[nw:]
 
 		if err != nil {
-			if code := ErrCode(err); code != SQLITE_ERROR {
+			if code := sqlite.ErrCode(err); code != sqlite.SQLITE_ERROR {
 				return C.int(code)
 			}
 			return C.SQLITE_IOERR
@@ -559,7 +576,7 @@ func strm_r_tramp(pIn unsafe.Pointer, pData *C.char, pnData *C.int) C.int {
 	//println("*pnData:", *pnData, "n:", n)
 	*pnData = C.int(n)
 	if err != nil && err != io.EOF {
-		if code := ErrCode(err); code != SQLITE_ERROR {
+		if code := sqlite.ErrCode(err); code != sqlite.SQLITE_ERROR {
 			return C.int(code)
 		}
 		return C.SQLITE_IOERR
@@ -569,7 +586,7 @@ func strm_r_tramp(pIn unsafe.Pointer, pData *C.char, pnData *C.int) C.int {
 
 type xapply struct {
 	id         int
-	conn       *Conn
+	conn       *sqlite.Conn
 	filterFn   func(string) bool
 	conflictFn func(ConflictType, ChangesetIter) ConflictAction
 }
@@ -603,4 +620,36 @@ func xapply_conflict_tramp(pCtx unsafe.Pointer, eConflict C.int, p *C.sqlite3_ch
 
 	action := x.conflictFn(ConflictType(eConflict), ChangesetIter{ptr: p})
 	return C.int(action)
+}
+
+func reserr(loc, query, msg string, res C.int) error {
+	if res != 0 {
+		return sqlite.Error{
+			Code:  sqlite.ErrorCode(res),
+			Loc:   loc,
+			Query: query,
+			Msg:   msg,
+		}
+	}
+	return nil
+}
+
+func itoa(buf []byte, val int64) []byte {
+	i := len(buf) - 1
+	neg := false
+	if val < 0 {
+		neg = true
+		val = 0 - val
+	}
+	for val >= 10 {
+		buf[i] = byte(val%10 + '0')
+		i--
+		val /= 10
+	}
+	buf[i] = byte(val + '0')
+	if neg {
+		i--
+		buf[i] = '-'
+	}
+	return buf[i:]
 }

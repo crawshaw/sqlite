@@ -12,7 +12,7 @@
 // ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 // OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
-package sqlite_test
+package sqlsession_test
 
 import (
 	"bytes"
@@ -21,6 +21,8 @@ import (
 
 	"crawshaw.io/sqlite"
 	"crawshaw.io/sqlite/sqliteutil"
+	"crawshaw.io/sqlite/sqlsession"
+	_ "crawshaw.io/sqlite/static"
 )
 
 func initT(t *testing.T, conn *sqlite.Conn) {
@@ -32,7 +34,7 @@ func initT(t *testing.T, conn *sqlite.Conn) {
 	}
 }
 
-func fillSession(t *testing.T) (*sqlite.Conn, *sqlite.Session) {
+func fillSession(t *testing.T) (*sqlite.Conn, *sqlsession.Session) {
 	conn, err := sqlite.OpenConn(":memory:", 0)
 	if err != nil {
 		t.Fatal(err)
@@ -43,7 +45,7 @@ func fillSession(t *testing.T) (*sqlite.Conn, *sqlite.Session) {
 	}
 	initT(t, conn) // two rows that predate the session
 
-	s, err := conn.CreateSession("")
+	s, err := sqlsession.CreateSession(conn, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,13 +114,13 @@ func TestChangeset(t *testing.T) {
 		t.Errorf("changeset has no length")
 	}
 
-	iter, err := sqlite.ChangesetIterStart(bytes.NewReader(b))
+	iter, err := sqlsession.ChangesetIterStart(bytes.NewReader(b))
 	if err != nil {
 		t.Fatal(err)
 	}
 	numChanges := 0
 	num3Cols := 0
-	opTypes := make(map[sqlite.OpType]int)
+	opTypes := make(map[sqlsession.OpType]int)
 	for {
 		hasRow, err := iter.Next()
 		if err != nil {
@@ -146,7 +148,7 @@ func TestChangeset(t *testing.T) {
 	if num3Cols != 102 {
 		t.Errorf("num3Cols=%d, want 102", num3Cols)
 	}
-	if got := opTypes[sqlite.SQLITE_INSERT]; got != 100 {
+	if got := opTypes[sqlsession.SQLITE_INSERT]; got != 100 {
 		t.Errorf("num inserts=%d, want 100", got)
 	}
 	if err := iter.Finalize(); err != nil {
@@ -170,7 +172,7 @@ func TestChangesetInvert(t *testing.T) {
 	b := buf.Bytes()
 
 	buf = new(bytes.Buffer)
-	if err := sqlite.ChangesetInvert(buf, bytes.NewReader(b)); err != nil {
+	if err := sqlsession.ChangesetInvert(buf, bytes.NewReader(b)); err != nil {
 		t.Fatal(err)
 	}
 	invB := buf.Bytes()
@@ -182,7 +184,7 @@ func TestChangesetInvert(t *testing.T) {
 	}
 
 	buf = new(bytes.Buffer)
-	if err := sqlite.ChangesetInvert(buf, bytes.NewReader(invB)); err != nil {
+	if err := sqlsession.ChangesetInvert(buf, bytes.NewReader(invB)); err != nil {
 		t.Fatal(err)
 	}
 	invinvB := buf.Bytes()
@@ -207,12 +209,12 @@ func TestChangesetApply(t *testing.T) {
 	b := buf.Bytes()
 
 	invBuf := new(bytes.Buffer)
-	if err := sqlite.ChangesetInvert(invBuf, bytes.NewReader(b)); err != nil {
+	if err := sqlsession.ChangesetInvert(invBuf, bytes.NewReader(b)); err != nil {
 		t.Fatal(err)
 	}
 
 	// Undo the entire session.
-	if err := conn.ChangesetApply(invBuf, nil, nil); err != nil {
+	if err := sqlsession.ChangesetApply(conn, invBuf, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -277,11 +279,11 @@ func TestPatchsetApply(t *testing.T) {
 			return false
 		}
 	}
-	conflictFn := func(sqlite.ConflictType, sqlite.ChangesetIter) sqlite.ConflictAction {
+	conflictFn := func(sqlsession.ConflictType, sqlsession.ChangesetIter) sqlsession.ConflictAction {
 		t.Error("conflict applying patchset")
-		return sqlite.SQLITE_CHANGESET_ABORT
+		return sqlsession.SQLITE_CHANGESET_ABORT
 	}
-	if err := conn.ChangesetApply(bytes.NewReader(b), filterFn, conflictFn); err != nil {
+	if err := sqlsession.ChangesetApply(conn, bytes.NewReader(b), filterFn, conflictFn); err != nil {
 		t.Fatal(err)
 	}
 	if !filterFnCalled {
@@ -303,8 +305,8 @@ func TestPatchsetApply(t *testing.T) {
 
 	// Second application of patchset should fail.
 	haveConflict := false
-	conflictFn = func(ct sqlite.ConflictType, iter sqlite.ChangesetIter) sqlite.ConflictAction {
-		if ct == sqlite.SQLITE_CHANGESET_CONFLICT {
+	conflictFn = func(ct sqlsession.ConflictType, iter sqlsession.ChangesetIter) sqlsession.ConflictAction {
+		if ct == sqlsession.SQLITE_CHANGESET_CONFLICT {
 			haveConflict = true
 		} else {
 			t.Errorf("unexpected conflict type: %v", ct)
@@ -313,12 +315,12 @@ func TestPatchsetApply(t *testing.T) {
 		if err != nil {
 			t.Errorf("conflict iter.Op() error: %v", err)
 		}
-		if opType != sqlite.SQLITE_INSERT {
+		if opType != sqlsession.SQLITE_INSERT {
 			t.Errorf("unexpected conflict op type: %v", opType)
 		}
-		return sqlite.SQLITE_CHANGESET_ABORT
+		return sqlsession.SQLITE_CHANGESET_ABORT
 	}
-	err := conn.ChangesetApply(bytes.NewReader(b), nil, conflictFn)
+	err := sqlsession.ChangesetApply(conn, bytes.NewReader(b), nil, conflictFn)
 	if code := sqlite.ErrCode(err); code != sqlite.SQLITE_ABORT {
 		t.Errorf("conflicting changeset Apply error is %v, want SQLITE_ABORT", err)
 	}

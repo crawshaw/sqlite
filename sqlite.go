@@ -175,6 +175,11 @@ func (conn *Conn) Close() error {
 	return reserr("Conn.Close", "", "", res)
 }
 
+// Ptr returns the underlying C.sqlite3 connection pointer.
+func (conn *Conn) Ptr() *uintptr {
+	return (*uintptr)(unsafe.Pointer(conn.conn))
+}
+
 // SetInterrupt assigns a channel to control connection execution lifetime.
 //
 // When doneCh is closed, the connection uses sqlite3_interrupt to

@@ -65,6 +65,8 @@ func (ctx Context) ResultError(err error) {
 	C.sqlite3_result_error(ctx.ptr, cerrstr, C.int(len(errstr)))
 }
 
+// A Value is a value that can be stored in SQLite.
+// It is stored in C-allocated memory.
 type Value struct {
 	ptr *C.sqlite3_value
 }
@@ -80,6 +82,9 @@ func (v Value) Text() string {
 func (v Value) Blob() []byte {
 	panic("TODO")
 }
+
+func (v Value) CPtr() *uintptr        { return (*uintptr)(unsafe.Pointer(v.ptr)) }
+func (v Value) SetCPtr(cptr *uintptr) { v.ptr = (*C.sqlite3_value)(unsafe.Pointer(cptr)) }
 
 type xfunc struct {
 	id     int
