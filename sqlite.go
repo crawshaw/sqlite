@@ -579,7 +579,7 @@ func (stmt *Stmt) ColumnCount() int {
 	return int(C.sqlite3_column_count(stmt.stmt))
 }
 
-// These routines return the name assigned to a particular column in the result
+// ColumnName returns the name assigned to a particular column in the result
 // set of a SELECT statement.
 // https://sqlite.org/c3ref/column_name.html
 func (stmt *Stmt) ColumnName(col int) string {
