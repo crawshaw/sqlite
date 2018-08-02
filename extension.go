@@ -46,13 +46,13 @@ func (conn *Conn) LoadExtension(ext, entry string) error {
 	defer C.free(unsafe.Pointer(cext))
 	var res C.int
 	var cerr *C.char
+	var centry *C.char
+	centry = nil
 	if entry != "" {
-		centry := C.CString(entry)
+		centry = C.CString(entry)
 		defer C.free(unsafe.Pointer(centry))
-		res = C.sqlite3_load_extension(conn.conn, cext, centry, &cerr)
-	} else {
-		res = C.sqlite3_load_extension(conn.conn, cext, nil, &cerr)
 	}
+	res = C.sqlite3_load_extension(conn.conn, cext, centry, &cerr)
 	err := C.GoString(cerr)
 	C.sqlite3_free(unsafe.Pointer(cerr))
 	return reserr("Conn.LoadExtension", "", err, res)
