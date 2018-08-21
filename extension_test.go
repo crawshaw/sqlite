@@ -101,7 +101,7 @@ func TestLoadExtension(t *testing.T) {
 		// TODO: add windows support
 		fallthrough
 	default:
-		t.Skip("unsupported OS: %s", runtime.GOOS)
+		t.Skipf("unsupported OS: %s", runtime.GOOS)
 	}
 	cmd := exec.Command(args[0], args[1:]...)
 	cmd.Dir = tmpdir
