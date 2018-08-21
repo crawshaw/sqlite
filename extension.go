@@ -45,7 +45,6 @@ func (conn *Conn) LoadExtension(ext, entry string) error {
 	cext := C.CString(ext)
 	defer C.free(unsafe.Pointer(cext))
 	var centry *C.char
-	centry = nil
 	if entry != "" {
 		centry = C.CString(entry)
 		defer C.free(unsafe.Pointer(centry))
