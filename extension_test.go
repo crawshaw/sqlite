@@ -45,7 +45,7 @@ const (
 ** OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 */
 
-#include <sqlite3ext.h>
+#include "sqlite3ext.h"
 SQLITE_EXTENSION_INIT1
 
 #include <stdlib.h>
@@ -86,16 +86,19 @@ func TestLoadExtension(t *testing.T) {
 	}
 	io.Copy(fout, strings.NewReader(extCode))
 	fout.Close()
+	include, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
 	var args []string
 	switch runtime.GOOS {
 	// See https://www.sqlite.org/loadext.html#build
 	case "darwin":
-		args = []string{"gcc", "-g", "-fPIC", "-dynamiclib", "ext.c", "-o", "libhello.dylib"}
+		args = []string{"gcc", "-g", "-fPIC", "-I" + include, "-dynamiclib", "ext.c", "-o", "libhello.dylib"}
 	case "linux":
-		args = []string{"gcc", "-g", "-fPIC", "-shared", "ext.c", "-o", "libhello.so"}
+		args = []string{"gcc", "-g", "-fPIC", "-I" + include, "-shared", "ext.c", "-o", "libhello.so"}
 	case "windows":
-		// TODO: add support for msvc cl?
-		args = []string{"gcc", "-g", "-fPIC", "-shared", "ext.c", "-o", "libhello.dll"}
+		args = []string{"gcc", "-g", "-I" + include, "-shared", "ext.c", "-o", "libhello.dll"}
 	default:
 		t.Skip("unsupported OS: %s", runtime.GOOS)
 	}
@@ -103,7 +106,7 @@ func TestLoadExtension(t *testing.T) {
 	cmd.Dir = tmpdir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatal(string(out), err)
+		t.Skipf("no gcc support: %s, %s", string(out), err)
 	}
 	c, err := sqlite.OpenConn(":memory:", 0)
 	if err != nil {
