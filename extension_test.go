@@ -28,7 +28,7 @@ import (
 )
 
 const (
-	extC = `
+	extCode = `
 /*
 ** Copyright (c) 2018 David Crawshaw <david@zentus.com>
 **
@@ -50,66 +50,29 @@ SQLITE_EXTENSION_INIT1
 
 #include <stdlib.h>
 
-extern void hellofunc(sqlite3_context *context, int argc, sqlite3_value **argv);
+static void hellofunc(
+	sqlite3_context *context,
+	int argc,
+	sqlite3_value **argv){
+		(void)argc;
+		(void)argv;
+		sqlite3_result_text(context, "Hello, World!", -1, SQLITE_STATIC);
+	}
 
 #ifdef _WIN32
 __declspec(dllexport)
 #endif
 int sqlite3_hello_init(
- sqlite3 *db,
- char **pzErrMsg,
- const sqlite3_api_routines *pApi
+	sqlite3 *db,
+	char **pzErrMsg,
+	const sqlite3_api_routines *pApi
 ){
-   int rc = SQLITE_OK;
-   SQLITE_EXTENSION_INIT2(pApi);
-   (void)pzErrMsg;  /* Unused parameter */
-   return sqlite3_create_function(db, "hello", 0, SQLITE_UTF8, 0, hellofunc, 0, 0);
+		int rc = SQLITE_OK;
+		SQLITE_EXTENSION_INIT2(pApi);
+		(void)pzErrMsg;  /* Unused parameter */
+		return sqlite3_create_function(db, "hello", 0, SQLITE_UTF8, 0, hellofunc, 0, 0);
 }`
-
-	extGo = `
-// Copyright (c) 2018 David Crawshaw <david@zentus.com>
-//
-// Permission to use, copy, modify, and distribute this software for any
-// purpose with or without fee is hereby granted, provided that the above
-// copyright notice and this permission notice appear in all copies.
-//
-// THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
-// WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
-// MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
-// ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
-// WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
-// ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
-// OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
-
-package main
-
-// #cgo CFLAGS: -I../
-// #cgo LDFLAGS: -ldl -lsqlite3
-// #include "sqlite3.h"
-// #include <stdlib.h>
-import "C"
-
-//export hellofunc
-func hellofunc(context *C.sqlite3_context, argc C.int, argv **C.sqlite3_value) {
-	C.sqlite3_result_text(context, C.CString("Hello, World!"), -1, (*[0]byte)(C.free))
-}
-
-func main() {}`
 )
-
-func libext(t *testing.T) string {
-	t.Helper()
-	switch runtime.GOOS {
-	case "darwin":
-		return "dylib"
-	case "linux":
-		return "so"
-	case "windows":
-		return "dll"
-	}
-	t.Skip("os not supported")
-	return ""
-}
 
 func TestLoadExtension(t *testing.T) {
 	tmpdir, err := ioutil.TempDir("", "sqlite")
@@ -117,21 +80,25 @@ func TestLoadExtension(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(tmpdir)
-	exts := []string{"c", "go"}
-	for i, ext := range []string{extC, extGo} {
-		fout, err := os.Create(filepath.Join(tmpdir, "ext.") + exts[i])
-		if err != nil {
-			t.Fatal(err)
-		}
-		io.Copy(fout, strings.NewReader(ext))
-		fout.Close()
+	fout, err := os.Create(filepath.Join(tmpdir, "ext.c"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	cmd := exec.Command(
-		"go",
-		"build",
-		"-buildmode=c-shared",
-		"-o", "libhello."+libext(t),
-	)
+	io.Copy(fout, strings.NewReader(extCode))
+	fout.Close()
+	var args []string
+	switch runtime.GOOS {
+	// See https://www.sqlite.org/loadext.html#build
+	case "darwin":
+		args = []string{"gcc", "-g", "-fPIC", "-dynamiclib", "ext.c", "-o", "libhello.dylib"}
+	case "linux":
+		args = []string{"gcc", "-g", "-fPIC", "-shared", "ext.c", "-o", "libhello.so"}
+	case "windows":
+		args = []string{"gcc", "-g", "-fPIC", "-shared", "ext.c", "-o", "libhello.dll"}
+	default:
+		t.Skip("unsupported OS: %s", runtime.GOOS)
+	}
+	cmd := exec.Command(args[0], args[1:]...)
 	cmd.Dir = tmpdir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -147,7 +114,7 @@ func TestLoadExtension(t *testing.T) {
 			t.Error(nil)
 		}
 	}()
-	libPath := filepath.Join(tmpdir, "libhello."+libext(t))
+	libPath := filepath.Join(tmpdir, args[len(args)-1])
 	err = c.LoadExtension(libPath, "")
 	if err == nil {
 		t.Error("loaded extension without enabling load extension")
