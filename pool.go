@@ -145,26 +145,6 @@ func (p *Pool) Close() (err error) {
 	return err
 }
 
-// All attempts to call function f on each conn in the pool, stopping if doneCh
-// is sent on.  The number of connections visited and the first error
-// enctountered from f is returned.
-func (p *Pool) All(f func(conn *Conn) error, doneCh <-chan struct{}) (int, error) {
-	n := 0
-	for n < len(p.all) {
-		conn := p.Get(doneCh)
-		if conn == nil {
-			return n, nil
-		}
-		defer p.Put(conn)
-		err := f(conn)
-		if err != nil {
-			return n, err
-		}
-		n++
-	}
-	return n, nil
-}
-
 type strerror struct {
 	msg string
 }
