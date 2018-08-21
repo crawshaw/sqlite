@@ -98,7 +98,8 @@ func TestLoadExtension(t *testing.T) {
 	case "linux":
 		args = []string{"gcc", "-g", "-fPIC", "-I" + include, "-shared", "ext.c", "-o", "libhello.so"}
 	case "windows":
-		args = []string{"gcc", "-g", "-I" + include, "-shared", "ext.c", "-o", "libhello.dll"}
+		// TODO: add windows support
+		fallthrough
 	default:
 		t.Skip("unsupported OS: %s", runtime.GOOS)
 	}
