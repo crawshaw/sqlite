@@ -94,6 +94,7 @@ func TestLoadExtension(t *testing.T) {
 	case "linux":
 		args = []string{"gcc", "-g", "-fPIC", "-shared", "ext.c", "-o", "libhello.so"}
 	case "windows":
+		// TODO: add support for msvc cl?
 		args = []string{"gcc", "-g", "-fPIC", "-shared", "ext.c", "-o", "libhello.dll"}
 	default:
 		t.Skip("unsupported OS: %s", runtime.GOOS)
