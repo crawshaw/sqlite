@@ -17,7 +17,7 @@ This is not a database/sql driver.
 A HTTP handler that uses a multi-threaded pool of SQLite connections via a shared cache.
 
 ```go
-var dbpool *sqlite.Pool
+var dbpool *sqlitex.Pool
 
 func main() {
 	var err error
