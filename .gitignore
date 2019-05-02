@@ -1,0 +1,5 @@
+*~
+/sqlite
+/sqlitex/sqlitex
+*.exe
+*.out
