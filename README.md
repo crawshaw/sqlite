@@ -10,6 +10,14 @@ A utility package, [sqlitex](https://godoc.org/crawshaw.io/sqlite/sqlitex), prov
 
 This is not a database/sql driver.
 
+## Installation
+
+If using _go modules_:
+
+```go get -u crawshaw.io/sqlite@master```
+
+otherwise:
+
 ```go get -u crawshaw.io/sqlite```
 
 ## Example
