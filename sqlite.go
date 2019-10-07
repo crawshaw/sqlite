@@ -194,6 +194,10 @@ func (conn *Conn) Close() error {
 	return reserr("Conn.Close", "", "", res)
 }
 
+func (conn *Conn) GetAutocommit() bool {
+	return int(C.sqlite3_get_autocommit(conn.conn)) != 0
+}
+
 // CheckResult reports whether any statement on this connection
 // is in the process of returning results.
 func (conn *Conn) CheckReset() string {
