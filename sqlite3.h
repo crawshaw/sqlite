@@ -1,4 +1,41 @@
 /*
+ * sqleet configuration.
+ *
+ * # SKIP_HEADER_BYTES
+ * Keep this many bytes unencrypted in the beginning of the database header.
+ * Value 0 produces encrypted databases that are indistinguishable from random.
+ * Use 24 for compatibility with the SQLite3 Encryption Extension (SEE) so that
+ * database settings (e.g., page size) can be read from an encrypted database.
+ * Alternatively, 'skip' and 'page_size' URI parameters can be used at run-time
+ * to specify the number of unencrypted bytes as well as the database page size.
+ */
+#ifndef SKIP_HEADER_BYTES
+#define SKIP_HEADER_BYTES 0
+#endif
+
+/*
+ * SQLite3 configuration.
+ *
+ * # SQLITE_HAS_CODEC
+ * Required for compiling SQLite3 with encryption support.
+ *
+ * # SQLITE_TEMP_STORE
+ * - 0 Store temp files on disk
+ * - 1 Store temp files on disk but allow overriding with `PRAGMA temp_store`
+ * - 2 Store temp files in memory but allow overriding with `PRAGMA temp_store`
+ * - 3 Store temp files on memory
+ * Note that temp files are *NOT* encrypted so using either 2 or 3 is critical!
+ */
+#ifndef SQLITE_HAS_CODEC
+#define SQLITE_HAS_CODEC 1
+#endif
+#ifndef SQLITE_TEMP_STORE
+#define SQLITE_TEMP_STORE 2
+#endif
+
+/* Omit "sqlite3.h" when including this header from "sqlite3.c" */
+#ifndef SQLITE3_H_OMIT
+/*
 ** 2001-09-15
 **
 ** The author disclaims copyright to this source code.  In place of
@@ -125,7 +162,7 @@ extern "C" {
 */
 #define SQLITE_VERSION        "3.31.1"
 #define SQLITE_VERSION_NUMBER 3031001
-#define SQLITE_SOURCE_ID      "2020-01-27 19:55:54 3bfa9cc97da10598521b342961df8f5f68c7388fa117345eeb516eaa837balt1"
+#define SQLITE_SOURCE_ID      "2020-01-27 19:55:54 3bfa9cc97da10598521b342961df8f5f68c7388fa117345eeb516eaa837bb4d6"
 
 /*
 ** CAPI3REF: Run-Time Library Version Numbers
@@ -12082,3 +12119,4 @@ struct fts5_api {
 #endif /* _FTS5_H */
 
 /******** End of fts5.h *********/
+#endif
