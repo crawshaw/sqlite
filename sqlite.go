@@ -63,6 +63,7 @@ package sqlite
 import "C"
 import (
 	"bytes"
+	"fmt"
 	"runtime"
 	"sync"
 	"time"
@@ -128,6 +129,18 @@ const sqlitex_pool = OpenFlags(0x01000000)
 // https://www.sqlite.org/c3ref/open.html
 func OpenConn(path string, flags OpenFlags) (*Conn, error) {
 	return openConn(path, flags)
+}
+
+func Crypto(conn *Conn, key string) error {
+	ckey := C.CString(key)
+	defer C.free(unsafe.Pointer(ckey))
+
+	// convert CString to void*: https://jamesadam.me/2016/03/26/c-and-go-dealing-with-void-parameters-in-cgo/
+	res := C.sqlite3_key(conn.conn, unsafe.Pointer(&ckey), 0)
+	if res != C.SQLITE_OK {
+		return fmt.Errorf("something went wrong")
+	}
+	return nil
 }
 
 func openConn(path string, flags OpenFlags) (*Conn, error) {
