@@ -63,7 +63,6 @@ package sqlite
 import "C"
 import (
 	"bytes"
-	"fmt"
 	"runtime"
 	"sync"
 	"time"
@@ -131,15 +130,33 @@ func OpenConn(path string, flags OpenFlags) (*Conn, error) {
 	return openConn(path, flags)
 }
 
-func Crypto(conn *Conn, key string) error {
+// ApplyKey specify the key for an encrypted database.
+// This routine should be called right after OpenConn
+func ApplyKey(conn *Conn, key string) error {
 	ckey := C.CString(key)
-	defer C.free(unsafe.Pointer(ckey))
+	cptrKey := unsafe.Pointer(ckey)
+	defer C.free(cptrKey)
 
-	// convert CString to void*: https://jamesadam.me/2016/03/26/c-and-go-dealing-with-void-parameters-in-cgo/
-	res := C.sqlite3_key(conn.conn, unsafe.Pointer(&ckey), 0)
+	res := C.sqlite3_key(conn.conn, cptrKey, C.int(C.strlen(ckey)))
 	if res != C.SQLITE_OK {
-		return fmt.Errorf("something went wrong")
+		return reserr("Conn.Unlock", "", "", res)
 	}
+
+	return nil
+}
+
+// ApplyRekey change the key on an open database.
+// If the current database is not encrypted, this routine will encrypt it.
+func ApplyRekey(conn *Conn, key string) error {
+	ckey := C.CString(key)
+	cptrKey := unsafe.Pointer(ckey)
+	defer C.free(cptrKey)
+
+	res := C.sqlite3_rekey(conn.conn, cptrKey, C.int(C.strlen(ckey)))
+	if res != C.SQLITE_OK {
+		return reserr("Conn.Unlock", "", "", res)
+	}
+
 	return nil
 }
 
