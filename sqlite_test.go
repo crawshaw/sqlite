@@ -504,11 +504,11 @@ func TestJournalMode(t *testing.T) {
 			0,
 		},
 		// temp databases can't have wal, only journal_mode=delete
-		// {
-		// 	"",
-		// 	"delete",
-		// 	0,
-		// },
+		{
+			"",
+			"delete",
+			0,
+		},
 	}
 
 	for _, test := range tests {
