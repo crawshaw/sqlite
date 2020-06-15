@@ -1,64 +1,57 @@
 package main
 
 import (
+	"fmt"
+	"log"
+
 	"crawshaw.io/sqlite"
-	"crawshaw.io/sqlite/sqlitex"
 )
 
 func main() {
-	dbString := "file:./database.db?key=swordfish&foreign_keys=on"
+	dbString := "file:./database.db?key=swordfish&journal_mode=wal"
 
-	poolSize := 10
-
-	dbpool, err := sqlitex.Open(dbString, 0, poolSize)
+	conn, err := sqlite.OpenConn(dbString, 0)
 	if err != nil {
-		panic(err)
+		log.Println(err)
+		return
 	}
+	defer conn.Close()
 
-	// enable all connection to have Foreign key feature
-	for i := 0; i < poolSize; i++ {
-		conn := dbpool.Get(nil)
-		err := sqlitex.Exec(conn, `PRAGMA foreign_keys = ON;`, nil)
-		if err != nil {
-			panic(err)
-		}
-		dbpool.Put(conn)
-	}
-
-	// // enable all connection to have Foreign key feature
-	// for i := 0; i < poolSize; i++ {
-	// 	conn := dbpool.Get(nil)
-	// 	err := sqlitex.Exec(conn, `PRAGMA key='swordfish';`, nil)
-	// 	if err != nil {
-	// 		panic(err)
-	// 	}
-	// 	dbpool.Put(conn)
-	// }
-
-	conn := dbpool.Get(nil)
-	err = sqlitex.Exec(conn, `PRAGMA key=swordfish;`, nil)
+	stmt, err := conn.Prepare(`CREATE TABLE IF NOT EXISTS groups ( id TEXT, name TEXT );`)
 	if err != nil {
-		panic(err)
-	}
-
-	err = sqlite.Crypto(conn, "swordfish2")
-	if err != nil {
-		panic(err)
-	}
-
-	stmt, err := conn.Prepare(`CREATE TABLE IF NOT EXISTS groups ( id TEXT PRIMARY KEY, name TEXT );`)
-	if err != nil {
-		panic(err)
+		log.Println(err)
+		return
 	}
 	stmt.Step()
-	dbpool.Put(conn)
 
-	conn = dbpool.Get(nil)
 	stmt, err = conn.Prepare(`INSERT INTO groups (id, name) VALUES ('1', 'name 1');`)
 	if err != nil {
-		panic(err)
+		log.Println(err)
+		return
 	}
 	stmt.Step()
-	dbpool.Put(conn)
+
+	stmt, err = conn.Prepare(`SELECT * FROM groups;`)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	for {
+		rowReturned, err := stmt.Step()
+		if err != nil {
+			log.Println(err)
+			return
+		}
+
+		if !rowReturned {
+			break
+		}
+
+		id := stmt.GetText("id")
+		name := stmt.GetText("name")
+
+		fmt.Println(id, name)
+	}
 
 }
