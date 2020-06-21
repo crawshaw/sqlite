@@ -44,7 +44,7 @@ package sqlite
 // #include <sqlite3.h>
 // #include <stdlib.h>
 // #include <string.h>
-// #include "wrappers.h"
+// #include <wrappers.h>
 //
 // // Use a helper function here to avoid the cgo pointer detection
 // // logic treating SQLITE_TRANSIENT as a Go pointer.
@@ -63,10 +63,18 @@ package sqlite
 import "C"
 import (
 	"bytes"
+	"fmt"
 	"runtime"
 	"sync"
 	"time"
 	"unsafe"
+)
+
+const (
+	CLib       = C.CGO_SQLITE
+	Version    = C.SQLITE_VERSION
+	CLibSQLite = "sqlite3"
+	CLibSQLeet = "sqleet"
 )
 
 // Conn is an open connection to an SQLite3 database.
@@ -110,6 +118,12 @@ const (
 	SQLITE_OPEN_SHAREDCACHE    = OpenFlags(C.SQLITE_OPEN_SHAREDCACHE)
 	SQLITE_OPEN_PRIVATECACHE   = OpenFlags(C.SQLITE_OPEN_PRIVATECACHE)
 	SQLITE_OPEN_WAL            = OpenFlags(C.SQLITE_OPEN_WAL)
+
+	OpenFlagsDefault = SQLITE_OPEN_READWRITE |
+		SQLITE_OPEN_CREATE |
+		SQLITE_OPEN_WAL |
+		SQLITE_OPEN_URI |
+		SQLITE_OPEN_NOMUTEX
 )
 
 // sqlitex_pool is used by sqlitex.Open to tell OpenConn that there is
@@ -126,44 +140,16 @@ const sqlitex_pool = OpenFlags(0x01000000)
 //	SQLITE_OPEN_NOMUTEX
 //
 // https://www.sqlite.org/c3ref/open.html
+//
+// Note that if you are opening an existing encrypted database that is
+// journal_mode=wal, you must provide the encryption key as a URI param.
 func OpenConn(path string, flags OpenFlags) (*Conn, error) {
 	return openConn(path, flags)
 }
-
-// ApplyKey specify the key for an encrypted database.
-// This routine should be called right after OpenConn
-func ApplyKey(conn *Conn, key string) error {
-	ckey := C.CString(key)
-	cptrKey := unsafe.Pointer(ckey)
-	defer C.free(cptrKey)
-
-	res := C.sqlite3_key(conn.conn, cptrKey, C.int(C.strlen(ckey)))
-	if res != C.SQLITE_OK {
-		return reserr("Conn.Unlock", "", "", res)
-	}
-
-	return nil
-}
-
-// ApplyRekey change the key on an open database.
-// If the current database is not encrypted, this routine will encrypt it.
-func ApplyRekey(conn *Conn, key string) error {
-	ckey := C.CString(key)
-	cptrKey := unsafe.Pointer(ckey)
-	defer C.free(cptrKey)
-
-	res := C.sqlite3_rekey(conn.conn, cptrKey, C.int(C.strlen(ckey)))
-	if res != C.SQLITE_OK {
-		return reserr("Conn.Unlock", "", "", res)
-	}
-
-	return nil
-}
-
 func openConn(path string, flags OpenFlags) (*Conn, error) {
 	sqliteInit.Do(sqliteInitFn)
 	if flags == 0 {
-		flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_WAL | SQLITE_OPEN_URI | SQLITE_OPEN_NOMUTEX
+		flags = OpenFlagsDefault
 	}
 	conn := &Conn{
 		stmts:      make(map[string]*Stmt),
@@ -237,14 +223,54 @@ func (conn *Conn) Close() error {
 	return reserr("Conn.Close", "", "", res)
 }
 
+// Unlock an encrypted database for reads and writes on this conn until
+// Conn.Close is called.
+//
+// If the database was opened with the correct key URI parameter, then it is
+// not necessary to call Unlock. Otherwise reads and writes on an encrypted
+// database will fail prior to successfully calling Unlock.
+//
+// Note that if the encrypted database uses journal_mode=wal and uses an
+// encrypted header (the defaults of this package), you must provide the
+// encryption key as a URI param or else OpenConn will fail.
+//
+// To initially encrypt a database or change the encryption key use
+// Conn.SetEncryptionKey.
+//
+// Unlock calls the sqlite3_key C API and requires the 'sqleet' go build tag.
+// https://github.com/resilar/sqleet/tree/v0.31.1#c-programming-interface
+func (conn *Conn) Unlock(key []byte) error {
+	return unlock(conn, key)
+}
+
+// SetEncryptionKey encrypts the main database with the given key.
+//
+// If the database is already encrypted and unlocked, this changes the key.
+// See Conn.Unlock for information about unlocking an encrypted database.
+//
+// If the key is empty, the database will be completely decrypted. In other
+// words an empty key converts an encrypted database to a normal SQLite
+// database.
+//
+// SetEncryptionKey calls the sqlite3_rekey C API and requires the 'sqleet' go
+// build tag.
+// https://github.com/resilar/sqleet/tree/v0.31.1#c-programming-interface
+func (conn *Conn) SetEncryptionKey(key []byte) error {
+	return setEncryptionKey(conn, key)
+}
+
+var (
+	unlock = func(*Conn, []byte) error {
+		return fmt.Errorf("Conn.Unlock requires the 'sqleet' build tag")
+	}
+	setEncryptionKey = func(*Conn, []byte) error {
+		return fmt.Errorf("Conn.SetEncryptionKey requires the 'sqleet' build tag")
+	}
+)
+
 func (conn *Conn) GetAutocommit() bool {
 	return int(C.sqlite3_get_autocommit(conn.conn)) != 0
 }
-
-const (
-	SQLITE_DBCONFIG_DQS_DML = C.int(C.SQLITE_DBCONFIG_DQS_DML)
-	SQLITE_DBCONFIG_DQS_DDL = C.int(C.SQLITE_DBCONFIG_DQS_DDL)
-)
 
 // EnableDoubleQuotedStringLiterals allows fine grained control over whether
 // double quoted string literals are accepted in Data Manipulation Language or
@@ -258,7 +284,7 @@ func (conn *Conn) EnableDoubleQuotedStringLiterals(dml, ddl bool) error {
 	if dml {
 		enable = 1
 	}
-	res := C.db_config_onoff(conn.conn, SQLITE_DBCONFIG_DQS_DML, enable)
+	res := C.db_config_onoff(conn.conn, C.SQLITE_DBCONFIG_DQS_DML, enable)
 	if res != 0 {
 		return reserr("Conn.EnableDoubleQuotedStringLiterals", "", "", res)
 	}
@@ -266,7 +292,7 @@ func (conn *Conn) EnableDoubleQuotedStringLiterals(dml, ddl bool) error {
 	if ddl {
 		enable = 1
 	}
-	res = C.db_config_onoff(conn.conn, SQLITE_DBCONFIG_DQS_DDL, enable)
+	res = C.db_config_onoff(conn.conn, C.SQLITE_DBCONFIG_DQS_DDL, enable)
 	if res != 0 {
 		return reserr("Conn.EnableDoubleQuotedStringLiterals", "", "", res)
 	}

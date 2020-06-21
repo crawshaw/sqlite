@@ -504,9 +504,22 @@ func TestJournalMode(t *testing.T) {
 			0,
 		},
 		// temp databases can't have wal, only journal_mode=delete
+		//
+		// SQLeet uses SQLITE_TEMP_STORE=2 by default, to avoid writing
+		// unencrypted journals to disk. This causes temporary
+		// databases to be opened in journal_mode=memory since even
+		// delete mode writes a temporary WAL file per transaction.
 		{
 			"",
-			"delete",
+			func() string {
+				switch sqlite.CLib {
+				case sqlite.CLibSQLite:
+					return "delete"
+				case sqlite.CLibSQLeet:
+					return "memory"
+				}
+				panic("invalid CLib")
+			}(),
 			0,
 		},
 	}
@@ -524,6 +537,7 @@ func TestJournalMode(t *testing.T) {
 				t.Error(err)
 			}
 		}()
+
 		stmt := c.Prep("PRAGMA journal_mode;")
 		if hasRow, err := stmt.Step(); err != nil {
 			t.Fatal(err)
@@ -531,7 +545,7 @@ func TestJournalMode(t *testing.T) {
 			t.Error("PRAGMA journal_mode: has no row")
 		}
 		if got := stmt.GetText("journal_mode"); got != test.mode {
-			t.Errorf("journal_mode not set properly, got: %s, want: %s", got, test.mode)
+			t.Errorf("journal_mode not set properly for %q, got: %s, want: %s", test.db, got, test.mode)
 		}
 	}
 }
