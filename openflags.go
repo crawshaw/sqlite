@@ -3,6 +3,7 @@ package sqlite
 // #include <sqlite3.h>
 import "C"
 import "strings"
+import "fmt"
 
 // OpenFlags are flags used when opening a Conn.
 //
