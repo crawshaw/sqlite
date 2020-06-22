@@ -35,11 +35,17 @@ test-all: test test-sqleet
 test: sqlite3.o
 	go test -tags=link ./...
 
+test-race: sqlite3.o
+	go test -tags=link -race  ./...
+
 sqleet: sqleet.o
 	go build -tags=link,sqleet ./...
 
 test-sqleet: sqleet.o
 	go test -tags=link,sqleet ./
+
+test-race-sqleet: sqlite3.o
+	go test -tags=link,sqleet -race  ./...
 
 # Paths to look for source files
 VPATH = ./c/sqlite ./c/sqleet

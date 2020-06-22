@@ -12,5 +12,18 @@
 // ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 // OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
+#ifndef WRAPPERS_H
+#define WRAPPERS_H
+
 // cfree wraps free to fix https://github.com/crawshaw/sqlite/issues/60
 void cfree(void *p);
+
+int c_strm_w_tramp(void*, const void*, int);
+int c_strm_r_tramp(void*, const void*, int*);
+
+int c_xapply_conflict_tramp(void*, int, sqlite3_changeset_iter*);
+int c_xapply_filter_tramp(void*, const char*);
+
+void c_destroy_tramp(void*);
+
+#endif // WRAPPERS_H
