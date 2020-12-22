@@ -208,6 +208,35 @@ func (p *Pool) Close() (err error) {
 	return
 }
 
+// Size returns the maximum number of potential connections in the Pool.
+// Safe to call on a zero Pool
+func (p *Pool) Size() int {
+	return cap(p.free)
+}
+
+// ExecScript executes a script of SQL statements on all connections.
+// Useful for e.g., applying the same pragma to the entire pool.
+// Each invocation of the script is wrapped in a SAVEPOINT transaction,
+// which is rolled back on any error.
+// But if any invocation errors, the pool is closed to avoid inconsistent behaviour
+// between connections
+func (p *Pool) ExecScript(script string) (err error) {
+	// p.mu.RLock()
+	// defer p.mu.Unlock()
+	conns := make([]*sqlite.Conn, p.Size()) //used to drain the pool
+	for i := 0; i < len(conns); i++ {
+		conns[i] = p.Get(nil)
+		if err = ExecScript(conns[i], script); err != nil {
+			p.Close() //ignoring potential Close() errors
+			return err
+		}
+	}
+	for i := 0; i < len(conns); i++ {
+		p.Put(conns[i])
+	}
+	return nil
+}
+
 type strerror struct {
 	msg string
 }
