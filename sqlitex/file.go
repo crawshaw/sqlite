@@ -21,67 +21,87 @@ import (
 	"crawshaw.io/sqlite"
 )
 
-// Storage manages access to a list of blobs in an underlying sqlite database
-type Storage struct {
- 	err    error
+// BlobList is the minimum implmentation required to permit File to
+// store data as a collection of sqlite blobs (which may or may not be
+// stored in an sqlite database file)
+type BlobList interface {
+	//Add adds a blob of a certain size to a collection and returns an open
+	// sqlite.Blob ready for reading/writing
+	Add(size int64) (*sqlite.Blob, error)
+
+  // Get returns the sqlite.Blob at index 
+  Get(index int) *sqlite.Blob
+
+  // Delete closes and deletes the sqlite.Blob at index
+	Delete(index int) error
+
+	// Count returns the number of sqlite.Blobs in the collection
+	Count() int
+}
+
+var _ BlobList = (*tmpStore)(nil)
+
+// tmpStore implements BlobList to tmpStore
+type tmpStore struct {
+	err    error
 	conn   *sqlite.Conn
 	blobs  []*sqlite.Blob
 	rowids []int64
 }
 
-// NewStorageSize returns an initialized Storage
-func NewStorageSize(conn *sqlite.Conn, initSize int) (*Storage, error) {
-  st := &Storage{conn: conn}
+// NewstoreSize returns an initialized tmpStore
+func NewstoreSize(conn *sqlite.Conn, initSize int) (BlobList, error) {
+	st := &tmpStore{conn: conn}
 
-  stmt := conn.Prep("CREATE TEMP TABLE IF NOT EXISTS BlobBuffer (blob BLOB);")
+	stmt := conn.Prep("CREATE TEMP TABLE IF NOT EXISTS BlobBuffer (blob BLOB);")
 	if _, err := stmt.Step(); err != nil {
 		return nil, err
 	}
-	if err := st.Add(int64(initSize)); err != nil {
+	if _, err := st.Add(int64(initSize)); err != nil {
 		return nil, err
 	}
 	return st, nil
 }
 
-// Add appends a blob 
-func (st *Storage) Add(size int64) error {
+// Add appends a blob of a certain size
+func (st *tmpStore) Add(size int64) (*sqlite.Blob, error) {
 	stmt := st.conn.Prep("INSERT INTO BlobBuffer (blob) VALUES ($blob);")
 	stmt.SetZeroBlob("$blob", size)
 	if _, err := stmt.Step(); err != nil {
-		return err
+		return nil, err
 	}
 	rowid := st.conn.LastInsertRowID()
 	blob, err := st.conn.OpenBlob("temp", "BlobBuffer", "blob", rowid, true)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	st.blobs = append(st.blobs, blob)
 	st.rowids = append(st.rowids, rowid)
-	return nil
+	return blob, nil
 }
 
 // Delete deletes a blob
-func (st *Storage) Delete(index int) error {
-  err := st.blobs[index].Close()
-  if err!=nil {
-    return err
-  }
+func (st *tmpStore) Delete(index int) error {
+	err := st.blobs[index].Close()
+	if err != nil {
+		return err
+	}
 	stmt := st.conn.Prep("DELETE FROM BlobBuffer WHERE rowid = $rowid;")
 	stmt.SetInt64("$rowid", st.rowids[index])
-		if _, err := stmt.Step(); err != nil {
-			return err
-		}
+	if _, err := stmt.Step(); err != nil {
+		return err
+	}
 	return nil
 }
 
 // Count returns the number of allocated blobs
-func (st *Storage) Count() int {
-  return len(st.blobs)
+func (st *tmpStore) Count() int {
+	return len(st.blobs)
 }
 
 // Get returns the blob
-func (st *Storage) Get(index int) *sqlite.Blob {
-  return st.blobs[index]
+func (st *tmpStore) Get(index int) *sqlite.Blob {
+	return st.blobs[index]
 }
 
 // File is a readable, writable, and seekable series of temporary SQLite blobs.
@@ -89,10 +109,10 @@ type File struct {
 	io.Reader
 	io.Writer
 	io.Seeker
-	st  *Storage
-	err    error
-	off    bbpos
-	len    bbpos
+	st  BlobList
+	err error
+	off bbpos
+	len bbpos
 }
 
 func NewFile(conn *sqlite.Conn) (*File, error) {
@@ -100,18 +120,18 @@ func NewFile(conn *sqlite.Conn) (*File, error) {
 }
 
 func NewFileSize(conn *sqlite.Conn, initSize int) (*File, error) {
-  st, err := NewStorageSize(conn, initSize)
-  if err!= nil {
-    return nil, err
-  }
+	st, err := NewstoreSize(conn, initSize)
+	if err != nil {
+		return nil, err
+	}
 	return &File{st: st}, nil
 }
 
 // grow adds an sqlite blob if the buffer is out of space.
 func (bb *File) grow() error {
-	lastSize := bb.st.Get(bb.st.Count()-1).Size()
+	lastSize := bb.st.Get(bb.st.Count() - 1).Size()
 	size := lastSize * 2
-	if err := bb.st.Add(size); err != nil {
+	if _, err := bb.st.Add(size); err != nil {
 		return err
 	}
 	return nil
@@ -331,12 +351,8 @@ func (bb *File) Close() error {
 	if bb.err != nil {
 		return bb.err
 	}
-  for i:=0; i < bb.st.Count(); i++ {
-		// err := bb.st.Get(i).Close()
-		// if bb.err == nil {
-		// 	bb.err = err
-		// }
-    err := bb.st.Delete(i)
+	for i := 0; i < bb.st.Count(); i++ {
+		err := bb.st.Delete(i)
 		if bb.err == nil {
 			bb.err = err
 		}
