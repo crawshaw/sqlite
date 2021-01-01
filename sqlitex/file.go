@@ -21,16 +21,76 @@ import (
 	"crawshaw.io/sqlite"
 )
 
+// Storage manages access to a list of blobs in an underlying sqlite database
+type Storage struct {
+ 	err    error
+	conn   *sqlite.Conn
+	blobs  []*sqlite.Blob
+	rowids []int64
+}
+
+// NewStorageSize returns an initialized Storage
+func NewStorageSize(conn *sqlite.Conn, initSize int) (*Storage, error) {
+  st := &Storage{conn: conn}
+
+  stmt := conn.Prep("CREATE TEMP TABLE IF NOT EXISTS BlobBuffer (blob BLOB);")
+	if _, err := stmt.Step(); err != nil {
+		return nil, err
+	}
+	if err := st.Add(int64(initSize)); err != nil {
+		return nil, err
+	}
+	return st, nil
+}
+
+// Add appends a blob 
+func (st *Storage) Add(size int64) error {
+	stmt := st.conn.Prep("INSERT INTO BlobBuffer (blob) VALUES ($blob);")
+	stmt.SetZeroBlob("$blob", size)
+	if _, err := stmt.Step(); err != nil {
+		return err
+	}
+	rowid := st.conn.LastInsertRowID()
+	blob, err := st.conn.OpenBlob("temp", "BlobBuffer", "blob", rowid, true)
+	if err != nil {
+		return err
+	}
+	st.blobs = append(st.blobs, blob)
+	st.rowids = append(st.rowids, rowid)
+	return nil
+}
+
+// Delete deletes a blob
+func (st *Storage) Delete(index int) error {
+  err := st.blobs[index].Close()
+  if err!=nil {
+    return err
+  }
+	stmt := st.conn.Prep("DELETE FROM BlobBuffer WHERE rowid = $rowid;")
+	stmt.SetInt64("$rowid", st.rowids[index])
+		if _, err := stmt.Step(); err != nil {
+			return err
+		}
+	return nil
+}
+
+// Count returns the number of allocated blobs
+func (st *Storage) Count() int {
+  return len(st.blobs)
+}
+
+// Get returns the blob
+func (st *Storage) Get(index int) *sqlite.Blob {
+  return st.blobs[index]
+}
+
 // File is a readable, writable, and seekable series of temporary SQLite blobs.
 type File struct {
 	io.Reader
 	io.Writer
 	io.Seeker
-
+	st  *Storage
 	err    error
-	conn   *sqlite.Conn
-	blobs  []*sqlite.Blob
-	rowids []int64
 	off    bbpos
 	len    bbpos
 }
@@ -40,38 +100,18 @@ func NewFile(conn *sqlite.Conn) (*File, error) {
 }
 
 func NewFileSize(conn *sqlite.Conn, initSize int) (*File, error) {
-	bb := &File{conn: conn}
-	stmt := conn.Prep("CREATE TEMP TABLE IF NOT EXISTS BlobBuffer (blob BLOB);")
-	if _, err := stmt.Step(); err != nil {
-		return nil, err
-	}
-	if err := bb.addblob(int64(initSize)); err != nil {
-		return nil, err
-	}
-	return bb, nil
-}
-
-func (bb *File) addblob(size int64) error {
-	stmt := bb.conn.Prep("INSERT INTO BlobBuffer (blob) VALUES ($blob);")
-	stmt.SetZeroBlob("$blob", size)
-	if _, err := stmt.Step(); err != nil {
-		return err
-	}
-	rowid := bb.conn.LastInsertRowID()
-	blob, err := bb.conn.OpenBlob("temp", "BlobBuffer", "blob", rowid, true)
-	if err != nil {
-		return err
-	}
-	bb.blobs = append(bb.blobs, blob)
-	bb.rowids = append(bb.rowids, rowid)
-	return nil
+  st, err := NewStorageSize(conn, initSize)
+  if err!= nil {
+    return nil, err
+  }
+	return &File{st: st}, nil
 }
 
 // grow adds an sqlite blob if the buffer is out of space.
 func (bb *File) grow() error {
-	lastSize := bb.blobs[len(bb.blobs)-1].Size()
+	lastSize := bb.st.Get(bb.st.Count()-1).Size()
 	size := lastSize * 2
-	if err := bb.addblob(size); err != nil {
+	if err := bb.st.Add(size); err != nil {
 		return err
 	}
 	return nil
@@ -79,7 +119,7 @@ func (bb *File) grow() error {
 
 // rem reports the remaining available bytes in the pointed-to blob
 func (bb *File) rem(pos bbpos) int64 {
-	return bb.blobs[pos.index].Size() - pos.pos
+	return bb.st.Get(pos.index).Size() - pos.pos
 }
 
 func (bb *File) eq(p1, p2 bbpos) bool {
@@ -120,7 +160,7 @@ func (bb *File) zero(p1, p2 bbpos) error {
 		if w > int64(len(zeros)) {
 			w = int64(len(zeros))
 		}
-		nn, err := bb.blobs[p1.index].WriteAt(zeros[:w], p1.pos)
+		nn, err := bb.st.Get(p1.index).WriteAt(zeros[:w], p1.pos)
 		if err != nil {
 			return err
 		}
@@ -144,7 +184,7 @@ func (bb *File) Write(p []byte) (n int, err error) {
 	for len(p) > 0 {
 		w := bb.rem(bb.off)
 		if w == 0 {
-			if bb.off.index == len(bb.blobs)-1 {
+			if bb.off.index == bb.st.Count()-1 {
 				if bb.err = bb.grow(); bb.err != nil {
 					return n, bb.err
 				}
@@ -156,7 +196,7 @@ func (bb *File) Write(p []byte) (n int, err error) {
 		if int64(len(p)) < w {
 			w = int64(len(p))
 		}
-		nn, err := bb.blobs[bb.off.index].WriteAt(p[:w], bb.off.pos)
+		nn, err := bb.st.Get(bb.off.index).WriteAt(p[:w], bb.off.pos)
 		n += nn
 		p = p[nn:]
 		bb.off.pos += int64(nn)
@@ -187,13 +227,13 @@ func (bb *File) Read(p []byte) (n int, err error) {
 		if bb.len.index == bb.off.index {
 			bsize = bb.len.pos
 		} else {
-			bsize = bb.blobs[bb.off.index].Size()
+			bsize = bb.st.Get(bb.off.index).Size()
 		}
 		w := bsize - bb.off.pos
 		if int64(len(p)) < w {
 			w = int64(len(p))
 		}
-		nn, err := bb.blobs[bb.off.index].ReadAt(p[:w], bb.off.pos)
+		nn, err := bb.st.Get(bb.off.index).ReadAt(p[:w], bb.off.pos)
 		n += nn
 		p = p[nn:]
 		bb.off.pos += int64(nn)
@@ -225,7 +265,7 @@ func (bb *File) Seek(offset int64, whence int) (int64, error) {
 		// use offset directly
 	case SeekCurrent:
 		for i := 0; i < bb.off.index; i++ {
-			offset += bb.blobs[i].Size()
+			offset += bb.st.Get(i).Size()
 		}
 		offset += bb.off.pos
 	case SeekEnd:
@@ -237,11 +277,11 @@ func (bb *File) Seek(offset int64, whence int) (int64, error) {
 
 	rem := offset
 	bb.off.index = 0
-	for i := 0; rem > bb.blobs[i].Size(); i++ {
+	for i := 0; rem > bb.st.Get(i).Size(); i++ {
 		bb.off.index = i + 1
-		rem -= bb.blobs[i].Size()
+		rem -= bb.st.Get(i).Size()
 
-		if i == len(bb.blobs)-1 {
+		if i == bb.st.Count()-1 {
 			if err := bb.grow(); err != nil {
 				return offset - rem, err
 			}
@@ -254,8 +294,8 @@ func (bb *File) Seek(offset int64, whence int) (int64, error) {
 
 func (bb *File) Truncate(size int64) error {
 	for {
-		for i := 0; i < len(bb.blobs); i++ {
-			bsize := bb.blobs[i].Size()
+		for i := 0; i < bb.st.Count(); i++ {
+			bsize := bb.st.Get(i).Size()
 			if bsize > size {
 				newlen := bbpos{index: i, pos: size}
 				if err := bb.zero(bb.len, newlen); err != nil {
@@ -274,15 +314,15 @@ func (bb *File) Truncate(size int64) error {
 
 func (bb *File) Len() (n int64) {
 	for i := 0; i < bb.len.index; i++ {
-		n += bb.blobs[i].Size()
+		n += bb.st.Get(i).Size()
 	}
 	n += bb.len.pos
 	return n
 }
 
 func (bb *File) Cap() (n int64) {
-	for i := 0; i < len(bb.blobs); i++ {
-		n += bb.blobs[i].Size()
+	for i := 0; i < bb.st.Count(); i++ {
+		n += bb.st.Get(i).Size()
 	}
 	return n
 }
@@ -291,22 +331,16 @@ func (bb *File) Close() error {
 	if bb.err != nil {
 		return bb.err
 	}
-	for _, blob := range bb.blobs {
-		err := blob.Close()
+  for i:=0; i < bb.st.Count(); i++ {
+		// err := bb.st.Get(i).Close()
+		// if bb.err == nil {
+		// 	bb.err = err
+		// }
+    err := bb.st.Delete(i)
 		if bb.err == nil {
 			bb.err = err
 		}
 	}
-	stmt := bb.conn.Prep("DELETE FROM BlobBuffer WHERE rowid = $rowid;")
-	for _, rowid := range bb.rowids {
-		stmt.Reset()
-		stmt.SetInt64("$rowid", rowid)
-		if _, err := stmt.Step(); err != nil && bb.err == nil {
-			bb.err = err
-		}
-	}
-	bb.blobs = nil
-	bb.rowids = nil
 	return bb.err
 }
 
