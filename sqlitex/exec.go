@@ -66,7 +66,7 @@ import (
 //		b = append(b, stmt.ColumnInt64(1))
 //		return nil
 //	}
-//	err := sqlutil.Exec(conn, "SELECT a, b FROM t WHERE c = ? AND d = ?;", fn, 42, 1)
+//	err := sqlitex.Exec(conn, "SELECT a, b FROM t WHERE c = ? AND d = ?;", fn, 42, 1)
 //	if err != nil {
 //		// handle err
 //	}
@@ -166,7 +166,7 @@ func annotateErr(err error) error {
 		}
 		return err
 	}
-	return fmt.Errorf("sqlutil.Exec: %v", err)
+	return fmt.Errorf("sqlitex.Exec: %v", err)
 }
 
 // ExecScript executes a script of SQL statements.
