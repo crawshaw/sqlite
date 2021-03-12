@@ -1054,6 +1054,15 @@ func (stmt *Stmt) ColumnIndex(colName string) int {
 	return col
 }
 
+// GetType returns a query result type for colName
+func (stmt *Stmt) GetType(colName string) ColumnType {
+	col, found := stmt.colNames[colName]
+	if !found {
+		return SQLITE_NULL
+	}
+	return stmt.ColumnType(col)
+}
+
 // GetInt64 returns a query result value for colName as an int64.
 func (stmt *Stmt) GetInt64(colName string) int64 {
 	col, found := stmt.colNames[colName]

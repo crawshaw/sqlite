@@ -103,9 +103,15 @@ func TestConn(t *testing.T) {
 		if typ != sqlite.SQLITE_TEXT {
 			t.Errorf(`ColumnType(0)=%q, want %q`, typ, sqlite.SQLITE_TEXT)
 		}
+		if getType := stmt.GetType("foo1"); getType != typ {
+			t.Errorf(`GetType("foo1")=%q, want %q`, getType, typ)
+		}
 		intTyp := stmt.ColumnType(1)
 		if intTyp != sqlite.SQLITE_INTEGER {
 			t.Errorf(`ColumnType(1)=%q, want %q`, intTyp, sqlite.SQLITE_INTEGER)
+		}
+		if getIntType := stmt.GetType("foo2"); getIntType != intTyp {
+			t.Errorf(`GetType("foo2")=%q, want %q`, getIntType, intTyp)
 		}
 		gotVals = append(gotVals, val)
 		gotInts = append(gotInts, intVal)
