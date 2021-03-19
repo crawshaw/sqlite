@@ -243,3 +243,34 @@ func TestPoolPutMatch(t *testing.T) {
 		dbpool1.Put(c)
 	}()
 }
+
+func TestPoolExecScript(t *testing.T) {
+	dbpool := newMemPool(t)
+	defer func() {
+		if err := dbpool.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	if err := dbpool.ExecScript("PRAGMA user_version=1;"); err != nil {
+		t.Error(err)
+	}
+	version := 0
+	// check the journal_mode state of each pool
+	fn := func(stmt *sqlite.Stmt) error {
+		version = stmt.ColumnInt(0)
+		return nil
+	}
+	conns := make([]*sqlite.Conn, dbpool.Size()) // to drain the pool
+	for i := 0; i < len(conns); i++ {
+		conns[i] = dbpool.Get(nil)
+		if err := sqlitex.Exec(conns[0], "PRAGMA user_version;", fn); err != nil {
+			t.Fatal(err)
+		}
+		if version != 1 {
+			t.Errorf("version=%d, want 1", version)
+		}
+	}
+	for i := 0; i < len(conns); i++ {
+		dbpool.Put(conns[i])
+	}
+}
