@@ -28,4 +28,7 @@ int c_xapply_filter_tramp(void*, const char*);
 
 void c_destroy_tramp(void*);
 
+int c_collation_tramp(void *ptr, int aLen, const void *a, int bLen, const void *b);
+void c_destroy_collation_tramp(void *ptr);
+
 #endif // WRAPPERS_H

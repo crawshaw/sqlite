@@ -47,3 +47,12 @@ void c_destroy_tramp(void* ptr) {
         return go_destroy_tramp((uintptr_t)ptr);
 }
 
+extern int go_collation_tramp(uintptr_t, int, char *, int, char *);
+int c_collation_tramp(void *ptr, int aLen, const void *a, int bLen, const void *b) {
+        return go_collation_tramp((uintptr_t)ptr, aLen, (char *)a, bLen, (char *)b);
+}
+
+extern void go_destroy_collation_tramp(uintptr_t);
+void c_destroy_collation_tramp(void *ptr) {
+        return go_destroy_collation_tramp((uintptr_t)ptr);
+}
