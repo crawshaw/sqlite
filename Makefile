@@ -16,35 +16,39 @@
 # is imported, Go will build the ./c/sqlite.c file that is included directly by
 # static.go. However this is pretty slow ~30s. When developing this is very
 # annoying. Use this Makefile to pre-build the sqlite3.o object and then build
-# the package with the build tag linksqlite3, which will ignore static.go and
+# the package with the build tag link, which will ignore static.go and
 # use link.go instead to link against sqlite.o. This reduces compilation times
-# down to <3 sec!
+# down to < 3 sec!
 #
 # If you are using an editor that builds the project as you work on it, you'll
 # want to build the sqlite3.o object and tell your editor to use the
-# linksqlite3 go build tag when working on this project.
-# For vim-go, use the command `GoBuildTags linksqlite3` or
-# 	`let g:go_build_tags = # 'linksqlite3'`
+# link go build tag when working on this project.
+# For vim-go, use the command `GoBuildTags link` or
+# 	`let g:go_build_tags = # 'link'`
 
-export GOFLAGS=-tags=linksqlite3
-
-.PHONY: clean all env test release
+.PHONY: clean all env test sqleet test-all
 all: sqlite3.o
-	go build ./...
+	go build -tags=link ./...
+
+test-all: test test-sqleet
 
 test: sqlite3.o
-	go test  ./...
+	go test -tags=link ./...
 
 test-race: sqlite3.o
-	go test -race  ./...
-env:
-	go env
+	go test -tags=link -race  ./...
 
-## This builds the package statically.
-release:
-	go build -tags=!linksqlite3
+sqleet: sqleet.o
+	go build -tags=link,sqleet ./...
 
-VPATH = ./c # Look in ./c for source files
+test-sqleet: sqleet.o
+	go test -tags=link,sqleet ./
+
+test-race-sqleet: sqlite3.o
+	go test -tags=link,sqleet -race  ./...
+
+# Paths to look for source files
+VPATH = ./c/sqlite ./c/sqleet
 
 # !!! THESE DEFINES SHOULD MATCH sqlite.go for linux !!!
 CFLAGS += -std=c99
@@ -67,8 +71,5 @@ CFLAGS += -DSQLITE_ENABLE_GEOPOLY
 LDFLAGS = -ldl -lm
 # !!! THESE DEFINES SHOULD MATCH sqlite.go !!!
 
-sqlite3.o: sqlite3.c sqlite3.h sqlite3ext.h
-
-
 clean:
-	rm -f sqlite3.o
+	rm -f sqlite3.o sqleet.o
