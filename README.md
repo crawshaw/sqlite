@@ -50,3 +50,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 ```
 
 https://godoc.org/crawshaw.io/sqlite
+
+## Platform specific considerations
+
+By default it requires some pthreads DLL on Windows. To avoid it, supply `CGOLDFLAGS="-static"` when building your application.
