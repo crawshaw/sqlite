@@ -153,6 +153,10 @@ func openConn(path string, flags ...OpenFlags) (*Conn, error) {
 		}
 	})
 
+	// Large timeout as Go programs should control timeouts
+	// using SetInterrupt. Documented in SetBusyTimeout.
+	conn.SetBusyTimeout(10 * time.Second)
+
 	if openFlags&SQLITE_OPEN_WAL > 0 {
 		stmt, _, err := conn.PrepareTransient("PRAGMA journal_mode=wal;")
 		if err != nil {
@@ -166,9 +170,6 @@ func openConn(path string, flags ...OpenFlags) (*Conn, error) {
 		}
 	}
 
-	// Large timeout as Go programs should control timeouts
-	// using SetInterrupt. Documented in SetBusyTimeout.
-	conn.SetBusyTimeout(10 * time.Second)
 
 	return conn, nil
 }
