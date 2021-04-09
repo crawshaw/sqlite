@@ -409,16 +409,6 @@ func TestBindBytes(t *testing.T) {
 
 	stmt.Reset()
 
-	stmt.SetBytes("$bytes", val)
-	if hasRow, err := stmt.Step(); err != nil {
-		t.Fatal(err)
-	} else if !hasRow {
-		t.Error("SetBytes: result has no row")
-	}
-	if got := stmt.ColumnInt(0); got != 1 {
-		t.Errorf("SetBytes: count is %d, want 1", got)
-	}
-
 	blob, err := c.OpenBlob("", "bindbytes", "c", 1, false)
 	if err != nil {
 		t.Fatalf("SetBytes: OpenBlob: %v", err)
