@@ -17,6 +17,7 @@ package sqlite_test
 import (
 	"bytes"
 	"context"
+	"io"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -373,59 +374,91 @@ func TestParallel(t *testing.T) {
 }
 
 func TestBindBytes(t *testing.T) {
-	c, err := sqlite.OpenConn(":memory:", 0)
-	if err != nil {
-		t.Fatal(err)
+	tests := []struct {
+		name     string
+		val      []byte
+		wantNull bool
+	}{
+		{
+			name: "Data with NUL bytes",
+			val:  []byte("\x00\x00hello world\x00\x00\x00"),
+		},
+		{
+			name: "Empty non-nil slice",
+			val:  []byte{},
+		},
+		{
+			name:     "Nil slice stores NULL",
+			wantNull: true,
+		},
 	}
-	defer func() {
-		if err := c.Close(); err != nil {
-			t.Error(err)
-		}
-	}()
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			c, err := sqlite.OpenConn(":memory:", 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				if err := c.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
 
-	val := make([]byte, 32)
-	copy(val[5:], []byte("hello world"))
+			stmt := c.Prep("CREATE TABLE IF NOT EXISTS bindbytes (c);")
+			if _, err := stmt.Step(); err != nil {
+				t.Fatal(err)
+			}
+			stmt = c.Prep("INSERT INTO bindbytes (c) VALUES ($bytes);")
+			stmt.SetBytes("$bytes", test.val)
+			if _, err := stmt.Step(); err != nil {
+				t.Fatal(err)
+			}
 
-	stmt := c.Prep("CREATE TABLE IF NOT EXISTS bindbytes (c);")
-	if _, err := stmt.Step(); err != nil {
-		t.Fatal(err)
-	}
-	stmt = c.Prep("INSERT INTO bindbytes (c) VALUES ($bytes);")
-	stmt.SetBytes("$bytes", val)
-	if _, err := stmt.Step(); err != nil {
-		t.Fatal(err)
-	}
+			if !test.wantNull {
+				stmt = c.Prep("SELECT count(*) FROM bindbytes WHERE c = $bytes;")
+				stmt.SetBytes("$bytes", test.val)
+			} else {
+				stmt = c.Prep("SELECT count(*) FROM bindbytes WHERE c IS NULL")
+			}
+			if hasRow, err := stmt.Step(); err != nil {
+				t.Fatal(err)
+			} else if !hasRow {
+				t.Error("SetBytes: result has no row")
+			}
+			if got := stmt.ColumnInt(0); got != 1 {
+				t.Errorf("SetBytes: count is %d, want 1", got)
+			}
 
-	stmt = c.Prep("SELECT count(*) FROM bindbytes WHERE c = $bytes;")
-	stmt.SetBytes("$bytes", val)
-	if hasRow, err := stmt.Step(); err != nil {
-		t.Fatal(err)
-	} else if !hasRow {
-		t.Error("SetBytes: result has no row")
-	}
-	if got := stmt.ColumnInt(0); got != 1 {
-		t.Errorf("SetBytes: count is %d, want 1", got)
-	}
+			stmt.Reset()
 
-	stmt.Reset()
+			if test.wantNull {
+				// Skip blob test, won't work with a NULL value
+				return
+			}
 
-	blob, err := c.OpenBlob("", "bindbytes", "c", 1, false)
-	if err != nil {
-		t.Fatalf("SetBytes: OpenBlob: %v", err)
-	}
-	defer func() {
-		if err := blob.Close(); err != nil {
-			t.Error(err)
-		}
-	}()
+			blob, err := c.OpenBlob("", "bindbytes", "c", 1, false)
+			if err != nil {
+				t.Fatalf("SetBytes: OpenBlob: %v", err)
+			}
+			defer func() {
+				if err := blob.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
 
-	storedVal := make([]byte, 40)
-	n, err := blob.Read(storedVal)
-	if err != nil {
-		t.Fatalf("SetBytes: Read: %v", err)
-	}
-	if !bytes.Equal(val, storedVal[:n]) {
-		t.Fatalf("SetBytes: want: %x, got: %x", val, storedVal)
+			wantEOF := (len(test.val) == 0)
+			storedVal := make([]byte, len(test.val)+8)
+			n, err := blob.Read(storedVal)
+			if err != nil && (!wantEOF || err != io.EOF) {
+				t.Fatalf("SetBytes: Read: %v", err)
+			}
+			if got := (err == io.EOF); got != wantEOF {
+				t.Fatalf("SetBytes: Read: got EOF? %t, want %t", got, wantEOF)
+			}
+			if !bytes.Equal(test.val, storedVal[:n]) {
+				t.Fatalf("SetBytes: want: %x, got: %x", test.val, storedVal)
+			}
+		})
 	}
 }
 
