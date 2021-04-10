@@ -52,6 +52,11 @@ package sqlite
 //	return sqlite3_bind_blob(stmt, col, p, n, SQLITE_TRANSIENT);
 // }
 //
+// // static_bind_blob is a helper to hide SQLITE_STATIC from cgo's
+// // pointer detection logic.
+// static int static_bind_blob(sqlite3_stmt* stmt, int col, unsigned char* p, int n) {
+//	return sqlite3_bind_blob(stmt, col, p, n, SQLITE_STATIC);
+// }
 // extern void log_fn(void* pArg, int code, char* msg);
 // static void enable_logging() {
 //	sqlite3_config(SQLITE_CONFIG_LOG, log_fn, NULL);
@@ -763,7 +768,11 @@ func (stmt *Stmt) BindBool(param int, value bool) {
 	stmt.handleBindErr("BindBool", res)
 }
 
+var zeroSlice = []byte{0}
+
 // BindBytes binds value to a numbered stmt parameter.
+//
+// If value is a nil slice, an SQL NULL value will be bound.
 //
 // In-memory copies of value are made using this interface.
 // For large blobs, consider using the streaming Blob object.
@@ -775,12 +784,18 @@ func (stmt *Stmt) BindBytes(param int, value []byte) {
 	if stmt.stmt == nil {
 		return
 	}
-	var v *C.uchar
-	if len(value) != 0 {
-		v = (*C.uchar)(unsafe.Pointer(&value[0]))
+	var res C.int
+	switch {
+	case value == nil:
+		res = C.sqlite3_bind_null(stmt.stmt, C.int(param))
+	case len(value) == 0:
+		v := (*C.uchar)(unsafe.Pointer(&zeroSlice[0]))
+		res = C.static_bind_blob(stmt.stmt, C.int(param), v, C.int(0))
+	default:
+		v := (*C.uchar)(unsafe.Pointer(&value[0]))
+		res = C.transient_bind_blob(stmt.stmt, C.int(param), v, C.int(len(value)))
+		runtime.KeepAlive(value)
 	}
-	res := C.transient_bind_blob(stmt.stmt, C.int(param), v, C.int(len(value)))
-	runtime.KeepAlive(value)
 	stmt.handleBindErr("BindBytes", res)
 }
 
@@ -857,6 +872,9 @@ func (stmt *Stmt) SetBool(param string, value bool) {
 }
 
 // SetBytes binds bytes to a parameter using a column name.
+//
+// If value is a nil slice, an SQL NULL value will be bound.
+//
 // An invalid parameter name will cause the call to Step to return an error.
 func (stmt *Stmt) SetBytes(param string, value []byte) {
 	stmt.BindBytes(stmt.findBindName("SetBytes", param), value)
