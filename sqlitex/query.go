@@ -6,8 +6,8 @@ import (
 	"crawshaw.io/sqlite"
 )
 
-var errNoResults = errors.New("sqlite: statement has no results")
-var errMultipleResults = errors.New("sqlite: statement has multiple result rows")
+var ErrNoResults = errors.New("sqlite: statement has no results")
+var ErrMultipleResults = errors.New("sqlite: statement has multiple result rows")
 
 func resultSetup(stmt *sqlite.Stmt) error {
 	hasRow, err := stmt.Step()
@@ -17,7 +17,7 @@ func resultSetup(stmt *sqlite.Stmt) error {
 	}
 	if !hasRow {
 		stmt.Reset()
-		return errNoResults
+		return ErrNoResults
 	}
 	return nil
 }
@@ -30,7 +30,7 @@ func resultTeardown(stmt *sqlite.Stmt) error {
 	}
 	if hasRow {
 		stmt.Reset()
-		return errMultipleResults
+		return ErrMultipleResults
 	}
 	return stmt.Reset()
 }
