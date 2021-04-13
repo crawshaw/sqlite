@@ -40,7 +40,7 @@ func TestResult(t *testing.T) {
 		}
 	}
 
-	t.Run("int64/result", func(t *testing.T) {
+	t.Run("Int64/Result", func(t *testing.T) {
 		_, ins, sel, done := setup(t)
 		defer done()
 
@@ -58,7 +58,7 @@ func TestResult(t *testing.T) {
 		}
 	})
 
-	t.Run("int64/astext", func(t *testing.T) {
+	t.Run("Int64/AsText", func(t *testing.T) {
 		_, ins, sel, done := setup(t)
 		defer done()
 
@@ -76,7 +76,7 @@ func TestResult(t *testing.T) {
 		}
 	})
 
-	t.Run("int64/errmultipleresults", func(t *testing.T) {
+	t.Run("Int64/ErrMultipleResults", func(t *testing.T) {
 		_, ins, sel, done := setup(t)
 		defer done()
 
@@ -104,7 +104,7 @@ func TestResult(t *testing.T) {
 		}
 	})
 
-	t.Run("int64/errnoresult", func(t *testing.T) {
+	t.Run("Int64/ErrNoResult", func(t *testing.T) {
 		_, _, sel, done := setup(t)
 		defer done()
 
@@ -117,7 +117,7 @@ func TestResult(t *testing.T) {
 		}
 	})
 
-	t.Run("float/result", func(t *testing.T) {
+	t.Run("Float/Result", func(t *testing.T) {
 		_, ins, sel, done := setup(t)
 		defer done()
 
@@ -135,7 +135,7 @@ func TestResult(t *testing.T) {
 		}
 	})
 
-	t.Run("float/errmultipleresults", func(t *testing.T) {
+	t.Run("Float/ErrMultipleResults", func(t *testing.T) {
 		_, ins, sel, done := setup(t)
 		defer done()
 
@@ -162,7 +162,7 @@ func TestResult(t *testing.T) {
 		}
 	})
 
-	t.Run("float/errnoresult", func(t *testing.T) {
+	t.Run("Float/ErrNoResult", func(t *testing.T) {
 		_, _, sel, done := setup(t)
 		defer done()
 
@@ -175,7 +175,7 @@ func TestResult(t *testing.T) {
 		}
 	})
 
-	t.Run("text/result", func(t *testing.T) {
+	t.Run("Text/Result", func(t *testing.T) {
 		_, ins, sel, done := setup(t)
 		defer done()
 
@@ -193,7 +193,7 @@ func TestResult(t *testing.T) {
 		}
 	})
 
-	t.Run("text/errmultipleresults", func(t *testing.T) {
+	t.Run("Text/ErrMultipleResults", func(t *testing.T) {
 		_, ins, sel, done := setup(t)
 		defer done()
 
@@ -220,7 +220,7 @@ func TestResult(t *testing.T) {
 		}
 	})
 
-	t.Run("text/errnoresult", func(t *testing.T) {
+	t.Run("Text/ErrNoResult", func(t *testing.T) {
 		_, _, sel, done := setup(t)
 		defer done()
 
@@ -233,7 +233,7 @@ func TestResult(t *testing.T) {
 		}
 	})
 
-	t.Run("text/asint64", func(t *testing.T) {
+	t.Run("Text/AsInt64", func(t *testing.T) {
 		_, ins, sel, done := setup(t)
 		defer done()
 
