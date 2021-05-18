@@ -771,3 +771,43 @@ func TestLimit(t *testing.T) {
 		t.Errorf("sqlite.ErrCode(err) = %v; want %v", got, want)
 	}
 }
+
+func TestReturningClause(t *testing.T) {
+	// The RETURNING syntax has been supported by SQLite since version 3.35.0 (2021-03-12).
+	// https://www.sqlite.org/lang_returning.html
+	c, err := sqlite.OpenConn(":memory:", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := c.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+
+	stmt := c.Prep(`
+		CREATE TABLE fruits (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT NOT NULL
+		)
+	`)
+	if _, err = stmt.Step(); err != nil {
+		t.Fatal(err)
+	}
+	_ = stmt.Finalize()
+
+	stmt = c.Prep(`
+		INSERT INTO fruits (name)
+		VALUES (:fruit)
+		RETURNING id
+	`)
+	stmt.SetText(":fruit", "bananananana")
+	if ok, err := stmt.Step(); err != nil {
+		t.Fatal(err)
+	} else if !ok {
+		t.Fatal("no fruit id returned")
+	}
+	if id := stmt.GetInt64("id"); id != 1 {
+		t.Fatalf("want returned fruit id to be 1, got %d", id)
+	}
+}
