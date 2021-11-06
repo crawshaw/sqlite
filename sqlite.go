@@ -52,11 +52,6 @@ package sqlite
 //	return sqlite3_bind_blob(stmt, col, p, n, SQLITE_TRANSIENT);
 // }
 //
-// // static_bind_blob is a helper to hide SQLITE_STATIC from cgo's
-// // pointer detection logic.
-// static int static_bind_blob(sqlite3_stmt* stmt, int col, unsigned char* p, int n) {
-//	return sqlite3_bind_blob(stmt, col, p, n, SQLITE_STATIC);
-// }
 // extern void log_fn(void* pArg, int code, char* msg);
 // static void enable_logging() {
 //	sqlite3_config(SQLITE_CONFIG_LOG, log_fn, NULL);
@@ -768,8 +763,6 @@ func (stmt *Stmt) BindBool(param int, value bool) {
 	stmt.handleBindErr("BindBool", res)
 }
 
-var zeroSlice = []byte{0}
-
 // BindBytes binds value to a numbered stmt parameter.
 //
 // If value is a nil slice, an SQL NULL value will be bound.
@@ -789,12 +782,11 @@ func (stmt *Stmt) BindBytes(param int, value []byte) {
 	case value == nil:
 		res = C.sqlite3_bind_null(stmt.stmt, C.int(param))
 	case len(value) == 0:
-		v := (*C.uchar)(unsafe.Pointer(&zeroSlice[0]))
-		res = C.static_bind_blob(stmt.stmt, C.int(param), v, C.int(0))
+		res = C.sqlite3_bind_zeroblob(stmt.stmt, C.int(param), C.int(0))
 	default:
 		v := (*C.uchar)(unsafe.Pointer(&value[0]))
 		res = C.transient_bind_blob(stmt.stmt, C.int(param), v, C.int(len(value)))
-		runtime.KeepAlive(value)
+		runtime.KeepAlive(value) // Ensure that value is not GC'd during the above C call.
 	}
 	stmt.handleBindErr("BindBytes", res)
 }
