@@ -438,11 +438,15 @@ func (conn *Conn) prepare(query string, flags C.uint) (*Stmt, int, error) {
 	}
 	trailingBytes := int(C.strlen(ctrailing))
 
-	stmt.bindNames = make([]string, int(C.sqlite3_bind_parameter_count(stmt.stmt)))
+	bindCount := int(C.sqlite3_bind_parameter_count(stmt.stmt))
+	stmt.bindNames = make([]string, bindCount)
+	stmt.bindIndex = make(map[string]int, bindCount)
 	for i := range stmt.bindNames {
 		cname := C.sqlite3_bind_parameter_name(stmt.stmt, C.int(i+1))
 		if cname != nil {
-			stmt.bindNames[i] = C.GoString(cname)
+			name := C.GoString(cname)
+			stmt.bindNames[i] = name
+			stmt.bindIndex[name] = i + 1
 		}
 	}
 
@@ -522,6 +526,7 @@ type Stmt struct {
 	stmt          *C.sqlite3_stmt
 	query         string
 	bindNames     []string
+	bindIndex     map[string]int
 	colNames      map[string]int
 	bindErr       error
 	prepInterrupt bool // set if Prep was interrupted
@@ -691,15 +696,11 @@ func (stmt *Stmt) handleBindErr(loc string, res C.int) {
 }
 
 func (stmt *Stmt) findBindName(loc string, param string) int {
-	for i, name := range stmt.bindNames {
-		if name == param {
-			return i + 1 // 1-based indices
-		}
-	}
-	if stmt.bindErr == nil {
+	pos := stmt.bindIndex[param]
+	if pos == 0 && stmt.bindErr == nil {
 		stmt.bindErr = reserr("Stmt."+loc, stmt.query, "unknown parameter: "+param, C.SQLITE_ERROR)
 	}
-	return 0
+	return pos
 }
 
 // DataCount returns the number of columns in the current row of the result
@@ -742,12 +743,12 @@ func (stmt *Stmt) BindParamCount() int {
 // Parameters indices start at 1.
 //
 // https://www.sqlite.org/c3ref/bind_parameter_name.html
-func (stmt *Stmt) BindParamName(i int) string {
-	i-- // map from 1-based to 0-based
-	if i < 0 || i >= len(stmt.bindNames) {
+func (stmt *Stmt) BindParamName(param int) string {
+	param-- // map from 1-based to 0-based
+	if param < 0 || param >= len(stmt.bindNames) {
 		return ""
 	}
-	return stmt.bindNames[i]
+	return stmt.bindNames[param]
 }
 
 // BindInt64 binds value to a numbered stmt parameter.
