@@ -1,189 +1,138 @@
 package sqlitex
 
 import (
-	"fmt"
 	"testing"
 
 	"crawshaw.io/sqlite"
 )
 
 func TestResult(t *testing.T) {
-	setup := func(t *testing.T) (conn *sqlite.Conn, ins, sel *sqlite.Stmt, done func()) {
+	conn, err := sqlite.OpenConn(":memory:", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	if err := Exec(conn, "CREATE TABLE t (c1);", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	insert := func(t *testing.T, value interface{}) {
 		t.Helper()
-		conn, err := sqlite.OpenConn(":memory:", 0)
+		err := Exec(conn, "INSERT INTO t (c1) VALUES (?);", nil, value)
 		if err != nil {
 			t.Fatal(err)
-		}
-
-		if err := Exec(conn, "CREATE TABLE t (c1);", nil); err != nil {
-			conn.Close()
-			t.Fatal(err)
-		}
-
-		ins, err = conn.Prepare("INSERT INTO t (c1) VALUES ($c1);")
-		if err != nil {
-			conn.Close()
-			t.Fatal(err)
-		}
-
-		sel, _, err = conn.PrepareTransient("SELECT c1 FROM t")
-		if err != nil {
-			ins.Finalize()
-			conn.Close()
-			t.Fatal(err)
-		}
-
-		return conn, ins, sel, func() {
-			ins.Finalize()
-			sel.Finalize()
-			conn.Close()
 		}
 	}
 
-	t.Run("Int64/Result", func(t *testing.T) {
-		_, ins, sel, done := setup(t)
-		defer done()
+	t.Helper()
+	sel, err := conn.Prepare("SELECT c1 FROM t;")
+	if err != nil {
+		t.Fatal(err)
+	}
 
-		input := int64(1234)
-		ins.SetInt64("$c1", input)
-		if _, err := ins.Step(); err != nil {
+	cleanup := func(tt *testing.T) {
+		tt.Helper()
+		if sel.DataCount() != 0 {
+			tt.Fatal("Stmt was not reset")
+		}
+
+		// The following should immediately fail the parent test
+		// because we cannot continue without this essential cleanup.
+		if err := sel.Reset(); err != nil {
 			t.Fatal(err)
 		}
+		if err := Exec(conn, "DELETE FROM t;", nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Run("Int64/ok", func(t *testing.T) {
+		defer cleanup(t)
+
+		input := int64(1234)
+		insert(t, input)
+
 		result, err := ResultInt64(sel)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if result != input {
-			t.Fatal()
-		}
-	})
-
-	t.Run("Int64/AsText", func(t *testing.T) {
-		_, ins, sel, done := setup(t)
-		defer done()
-
-		input := int64(1234)
-		ins.SetInt64("$c1", input)
-		if _, err := ins.Step(); err != nil {
-			t.Fatal(err)
-		}
-		result, err := ResultText(sel)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if result != fmt.Sprint(input) {
-			t.Fatal(result, "!=", input)
+			t.Fatal("result != input")
 		}
 	})
 
 	t.Run("Int64/ErrMultipleResults", func(t *testing.T) {
-		_, ins, sel, done := setup(t)
-		defer done()
+		defer cleanup(t)
 
-		ins.SetInt64("$c1", int64(1234))
-		if _, err := ins.Step(); err != nil {
-			t.Fatal(err)
-		}
-		if err := ins.Reset(); err != nil {
-			t.Fatal(err)
-		}
-		ins.SetInt64("$c1", int64(5678))
-		if _, err := ins.Step(); err != nil {
-			t.Fatal(err)
-		}
+		input := int64(1234)
+		insert(t, input)
+		insert(t, input)
 
 		result, err := ResultInt64(sel)
-		if result != 0 {
-			t.Fatal()
-		}
-
-		// XXX: Using direct equality check as go.mod specifies Go 1.12, which does not
-		// have errors.Is. When go.mod is updated past 1.12, this should use errors.Is.
 		if err != ErrMultipleResults {
 			t.Fatal("err != ErrMultipleResults", err)
+		}
+		if result != input {
+			t.Fatal("result != input")
 		}
 	})
 
 	t.Run("Int64/ErrNoResult", func(t *testing.T) {
-		_, _, sel, done := setup(t)
-		defer done()
+		defer cleanup(t)
 
-		result, err := ResultInt64(sel)
-		if result != 0 {
-			t.Fatal()
-		}
+		_, err := ResultInt64(sel)
 		if err != ErrNoResults {
 			t.Fatal("err != ErrNoResults", err)
 		}
 	})
 
-	t.Run("Float/Result", func(t *testing.T) {
-		_, ins, sel, done := setup(t)
-		defer done()
+	t.Run("Float/ok", func(t *testing.T) {
+		defer cleanup(t)
 
 		input := float64(1234)
-		ins.SetFloat("$c1", input)
-		if _, err := ins.Step(); err != nil {
-			t.Fatal(err)
-		}
+		insert(t, input)
+
 		result, err := ResultFloat(sel)
 		if err != nil {
 			t.Fatal(err)
+		}
+		if result != input {
+			t.Fatal("result != input")
+		}
+	})
+
+	t.Run("Float/ErrMultipleResults", func(t *testing.T) {
+		defer cleanup(t)
+
+		input := float64(1234)
+		insert(t, input)
+		insert(t, input)
+
+		result, err := ResultFloat(sel)
+		if err != ErrMultipleResults {
+			t.Fatal("err != ErrMultipleResults", err)
 		}
 		if result != input {
 			t.Fatal()
 		}
 	})
 
-	t.Run("Float/ErrMultipleResults", func(t *testing.T) {
-		_, ins, sel, done := setup(t)
-		defer done()
-
-		ins.SetFloat("$c1", 123.4)
-		if _, err := ins.Step(); err != nil {
-			t.Fatal(err)
-		}
-		if err := ins.Reset(); err != nil {
-			t.Fatal(err)
-		}
-		ins.SetFloat("$c1", 567.8)
-		if _, err := ins.Step(); err != nil {
-			t.Fatal(err)
-		}
-		result, err := ResultFloat(sel)
-		if result != 0 {
-			t.Fatal()
-		}
-
-		// XXX: Using direct equality check as go.mod specifies Go 1.12, which does not
-		// have errors.Is. When go.mod is updated past 1.12, this should use errors.Is.
-		if err != ErrMultipleResults {
-			t.Fatal("err != ErrMultipleResults", err)
-		}
-	})
-
 	t.Run("Float/ErrNoResult", func(t *testing.T) {
-		_, _, sel, done := setup(t)
-		defer done()
+		defer cleanup(t)
 
-		result, err := ResultFloat(sel)
-		if result != 0 {
-			t.Fatal()
-		}
+		_, err := ResultFloat(sel)
 		if err != ErrNoResults {
 			t.Fatal("err != ErrNoResults", err)
 		}
 	})
 
-	t.Run("Text/Result", func(t *testing.T) {
-		_, ins, sel, done := setup(t)
-		defer done()
+	t.Run("Text/ok", func(t *testing.T) {
+		defer cleanup(t)
 
 		input := "test"
-		ins.SetText("$c1", input)
-		if _, err := ins.Step(); err != nil {
-			t.Fatal(err)
-		}
+		insert(t, input)
+
 		result, err := ResultText(sel)
 		if err != nil {
 			t.Fatal(err)
@@ -194,60 +143,27 @@ func TestResult(t *testing.T) {
 	})
 
 	t.Run("Text/ErrMultipleResults", func(t *testing.T) {
-		_, ins, sel, done := setup(t)
-		defer done()
+		defer cleanup(t)
 
-		ins.SetText("$c1", "test1")
-		if _, err := ins.Step(); err != nil {
-			t.Fatal(err)
-		}
-		if err := ins.Reset(); err != nil {
-			t.Fatal(err)
-		}
-		ins.SetText("$c1", "test2")
-		if _, err := ins.Step(); err != nil {
-			t.Fatal(err)
-		}
+		input := "test"
+		insert(t, input)
+		insert(t, input)
+
 		result, err := ResultText(sel)
-		if result != "" {
-			t.Fatal()
-		}
-
-		// XXX: Using direct equality check as go.mod specifies Go 1.12, which does not
-		// have errors.Is. When go.mod is updated past 1.12, this should use errors.Is.
 		if err != ErrMultipleResults {
 			t.Fatal("err != ErrMultipleResults", err)
+		}
+		if result != input {
+			t.Fatal("first result was not returned")
 		}
 	})
 
 	t.Run("Text/ErrNoResult", func(t *testing.T) {
-		_, _, sel, done := setup(t)
-		defer done()
+		defer cleanup(t)
 
-		result, err := ResultText(sel)
-		if result != "" {
-			t.Fatal()
-		}
+		_, err := ResultText(sel)
 		if err != ErrNoResults {
 			t.Fatal("err != ErrNoResults", err)
-		}
-	})
-
-	t.Run("Text/AsInt64", func(t *testing.T) {
-		_, ins, sel, done := setup(t)
-		defer done()
-
-		input := "test"
-		ins.SetText("$c1", input)
-		if _, err := ins.Step(); err != nil {
-			t.Fatal(err)
-		}
-		result, err := ResultInt64(sel)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if result != 0 {
-			t.Fatal(result, "!=", 0)
 		}
 	})
 }

@@ -37,11 +37,13 @@ func resultTeardown(stmt *sqlite.Stmt) error {
 
 // ResultInt steps the Stmt once and returns the first column as an int.
 //
-// If there are no rows in the result set, errors.Is(ErrNoResults) will
-// be true.
+// If there are no rows in the result set, ErrNoResults is returned.
 //
-// If there are multiple rows, errors.Is(ErrMultipleResults) will be true.
+// If there are multiple rows, ErrMultipleResults is returned with the first
+// result.
 //
+// The Stmt is always Reset, so repeated calls will always return the first
+// result.
 func ResultInt(stmt *sqlite.Stmt) (int, error) {
 	res, err := ResultInt64(stmt)
 	return int(res), err
@@ -49,54 +51,48 @@ func ResultInt(stmt *sqlite.Stmt) (int, error) {
 
 // ResultInt64 steps the Stmt once and returns the first column as an int64.
 //
-// If there are no rows in the result set, errors.Is(ErrNoResults) will
-// be true.
+// If there are no rows in the result set, ErrNoResults is returned.
 //
-// If there are multiple rows, errors.Is(ErrMultipleResults) will be true.
+// If there are multiple rows, ErrMultipleResults is returned with the first
+// result.
 //
+// The Stmt is always Reset, so repeated calls will always return the first
+// result.
 func ResultInt64(stmt *sqlite.Stmt) (int64, error) {
 	if err := resultSetup(stmt); err != nil {
 		return 0, err
 	}
-	res := stmt.ColumnInt64(0)
-	if err := resultTeardown(stmt); err != nil {
-		return 0, err
-	}
-	return res, nil
+	return stmt.ColumnInt64(0), resultTeardown(stmt)
 }
 
 // ResultText steps the Stmt once and returns the first column as a string.
 //
-// If there are no rows in the result set, errors.Is(ErrNoResults) will
-// be true.
+// If there are no rows in the result set, ErrNoResults is returned.
 //
-// If there are multiple rows, errors.Is(ErrMultipleResults) will be true.
+// If there are multiple rows, ErrMultipleResults is returned with the first
+// result.
 //
+// The Stmt is always Reset, so repeated calls will always return the first
+// result.
 func ResultText(stmt *sqlite.Stmt) (string, error) {
 	if err := resultSetup(stmt); err != nil {
 		return "", err
 	}
-	res := stmt.ColumnText(0)
-	if err := resultTeardown(stmt); err != nil {
-		return "", err
-	}
-	return res, nil
+	return stmt.ColumnText(0), resultTeardown(stmt)
 }
 
-// ResultFloat steps the Stmt once and returns the first column as a loat.
+// ResultFloat steps the Stmt once and returns the first column as a float64.
 //
-// If there are no rows in the result set, errors.Is(ErrNoResults) will
-// be true.
+// If there are no rows in the result set, ErrNoResults is returned.
 //
-// If there are multiple rows, errors.Is(ErrMultipleResults) will be true.
+// If there are multiple rows, ErrMultipleResults is returned with the first
+// result.
 //
+// The Stmt is always Reset, so repeated calls will always return the first
+// result.
 func ResultFloat(stmt *sqlite.Stmt) (float64, error) {
 	if err := resultSetup(stmt); err != nil {
 		return 0, err
 	}
-	res := stmt.ColumnFloat(0)
-	if err := resultTeardown(stmt); err != nil {
-		return 0, err
-	}
-	return res, nil
+	return stmt.ColumnFloat(0), resultTeardown(stmt)
 }
