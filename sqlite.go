@@ -858,7 +858,8 @@ func (stmt *Stmt) BindNull(param int) {
 	stmt.handleBindErr("BindNull", res)
 }
 
-// BindNull binds a blob of zeros of length len to a numbered stmt parameter.
+// BindZeroBlob binds a blob of zeros of length len to a numbered stmt
+// parameter.
 //
 // Parameter indices start at 1.
 //
