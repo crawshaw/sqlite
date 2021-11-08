@@ -187,7 +187,10 @@ func (p *Pool) Put(conn *sqlite.Conn) {
 	p.free <- conn
 }
 
-// PoolCloseTimeout is the
+// PoolCloseTimeout is the maximum time for Pool.Close to wait for all Conns to
+// be returned to the Pool.
+//
+// Do not modify this concurrently with calling Pool.Close.
 var PoolCloseTimeout = 5 * time.Second
 
 // Close interrupts and closes all the connections in the Pool.
