@@ -15,6 +15,7 @@
 package sqlitex_test
 
 import (
+	"context"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -27,7 +28,11 @@ import (
 	"crawshaw.io/sqlite/sqlitex"
 )
 
-const poolSize = 20
+const (
+	poolSize  = 20
+	poolURI   = "file::memory:?mode=memory&cache=shared"
+	poolFlags = sqlite.SQLITE_OPEN_READWRITE | sqlite.SQLITE_OPEN_CREATE | sqlite.SQLITE_OPEN_URI | sqlite.SQLITE_OPEN_NOMUTEX | sqlite.SQLITE_OPEN_SHAREDCACHE
+)
 
 // newMemPool returns new sqlitex.Pool attached to new database opened in memory.
 //
@@ -35,8 +40,7 @@ const poolSize = 20
 // any error is t.Fatal.
 func newMemPool(t *testing.T) *sqlitex.Pool {
 	t.Helper()
-	flags := sqlite.SQLITE_OPEN_READWRITE | sqlite.SQLITE_OPEN_CREATE | sqlite.SQLITE_OPEN_URI | sqlite.SQLITE_OPEN_NOMUTEX | sqlite.SQLITE_OPEN_SHAREDCACHE
-	dbpool, err := sqlitex.Open("file::memory:?mode=memory&cache=shared", flags, poolSize)
+	dbpool, err := sqlitex.Open(poolURI, poolFlags, poolSize)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,4 +246,59 @@ func TestPoolPutMatch(t *testing.T) {
 
 		dbpool1.Put(c)
 	}()
+}
+
+func TestPoolOpenInit(t *testing.T) {
+	t.Run("ok", func(t *testing.T) {
+		ctx := context.Background()
+		initScript := `
+                CREATE TABLE IF NOT EXISTS t(a INT, b INT);
+                CREATE TEMP VIEW v AS SELECT a FROM t;
+`
+		dbpool, err := sqlitex.OpenInit(ctx, poolURI, poolFlags, poolSize, initScript)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() {
+			if err := dbpool.Close(); err != nil {
+				t.Error(err)
+			}
+		}()
+
+		for i := 0; i < poolSize; i++ {
+			conn := dbpool.Get(nil)
+			defer dbpool.Put(conn)
+			if err := sqlitex.ExecScript(conn, `SELECT * FROM v;`); err != nil {
+				t.Fatalf("initScript not run on connection: %s", err)
+			}
+		}
+	})
+	t.Run("invalid initScript", func(t *testing.T) {
+		ctx := context.Background()
+		initScript := `invalid script`
+		dbpool, err := sqlitex.OpenInit(ctx, poolURI, poolFlags, poolSize, initScript)
+		if err != nil {
+			return
+		}
+		if err := dbpool.Close(); err != nil {
+			t.Error(err)
+		}
+		t.Fatal("an invalid script must fail initialization")
+	})
+	t.Run("interrupted", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		initScript := `
+                CREATE TABLE IF NOT EXISTS t(a INT, b INT);
+                CREATE TEMP VIEW v AS SELECT a FROM t;
+`
+		dbpool, err := sqlitex.OpenInit(ctx, poolURI, poolFlags, poolSize, initScript)
+		if err != nil {
+			return
+		}
+		if err := dbpool.Close(); err != nil {
+			t.Error(err)
+		}
+		t.Fatal("a cancelled context should interrupt initialization")
+	})
 }
