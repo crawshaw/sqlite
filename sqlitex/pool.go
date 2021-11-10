@@ -67,7 +67,7 @@ type Pool struct {
 //	SQLITE_OPEN_WAL
 //	SQLITE_OPEN_URI
 //	SQLITE_OPEN_NOMUTEX
-func Open(uri string, flags sqlite.OpenFlags, poolSize int, initScripts ...string) (pool *Pool, err error) {
+func Open(uri string, flags sqlite.OpenFlags, poolSize int) (pool *Pool, err error) {
 	return OpenInit(nil, uri, flags, poolSize, "")
 }
 
