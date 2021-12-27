@@ -61,7 +61,7 @@ type Snapshot struct {
 // if you are sure that a Snapshot will never be used again by any thread, you
 // may call Free once to release the memory earlier. No reads will be possible
 // on the Snapshot after Free is called on it, however any open read
-// transactionss will not be interrupted.
+// transactions will not be interrupted.
 //
 // See sqlitex.Pool.GetSnapshot for a helper function for automatically keeping
 // an open read transaction on a set aside connection until a Snapshot is GC'd.

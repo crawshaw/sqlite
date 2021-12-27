@@ -48,8 +48,8 @@ package sqlite
 //
 // // Use a helper function here to avoid the cgo pointer detection
 // // logic treating SQLITE_TRANSIENT as a Go pointer.
-// static int transient_bind_text(sqlite3_stmt* stmt, int col, char* p, int n) {
-//	return sqlite3_bind_text(stmt, col, p, n, SQLITE_TRANSIENT);
+// static int transient_bind_blob(sqlite3_stmt* stmt, int col, unsigned char* p, int n) {
+//	return sqlite3_bind_blob(stmt, col, p, n, SQLITE_TRANSIENT);
 // }
 //
 // extern void log_fn(void* pArg, int code, char* msg);
@@ -153,6 +153,10 @@ func openConn(path string, flags ...OpenFlags) (*Conn, error) {
 		}
 	})
 
+	// Large timeout as Go programs should control timeouts
+	// using SetInterrupt. Documented in SetBusyTimeout.
+	conn.SetBusyTimeout(10 * time.Second)
+
 	if openFlags&SQLITE_OPEN_WAL > 0 {
 		stmt, _, err := conn.PrepareTransient("PRAGMA journal_mode=wal;")
 		if err != nil {
@@ -166,9 +170,6 @@ func openConn(path string, flags ...OpenFlags) (*Conn, error) {
 		}
 	}
 
-	// Large timeout as Go programs should control timeouts
-	// using SetInterrupt. Documented in SetBusyTimeout.
-	conn.SetBusyTimeout(10 * time.Second)
 
 	return conn, nil
 }
@@ -347,7 +348,6 @@ func (conn *Conn) Prep(query string) *Stmt {
 			return &Stmt{
 				conn:          conn,
 				query:         query,
-				bindNames:     make(map[string]int),
 				colNames:      make(map[string]int),
 				prepInterrupt: true,
 			}
@@ -426,10 +426,9 @@ func (conn *Conn) prepare(query string, flags C.uint) (*Stmt, int, error) {
 	}
 
 	stmt := &Stmt{
-		conn:      conn,
-		query:     query,
-		bindNames: make(map[string]int),
-		colNames:  make(map[string]int),
+		conn:     conn,
+		query:    query,
+		colNames: make(map[string]int),
 	}
 	cquery := C.CString(query)
 	defer C.free(unsafe.Pointer(cquery))
@@ -440,10 +439,15 @@ func (conn *Conn) prepare(query string, flags C.uint) (*Stmt, int, error) {
 	}
 	trailingBytes := int(C.strlen(ctrailing))
 
-	for i, count := 1, stmt.BindParamCount(); i <= count; i++ {
-		cname := C.sqlite3_bind_parameter_name(stmt.stmt, C.int(i))
+	bindCount := int(C.sqlite3_bind_parameter_count(stmt.stmt))
+	stmt.bindNames = make([]string, bindCount)
+	stmt.bindIndex = make(map[string]int, bindCount)
+	for i := range stmt.bindNames {
+		cname := C.sqlite3_bind_parameter_name(stmt.stmt, C.int(i+1))
 		if cname != nil {
-			stmt.bindNames[C.GoString(cname)] = i
+			name := C.GoString(cname)
+			stmt.bindNames[i] = name
+			stmt.bindIndex[name] = i + 1
 		}
 	}
 
@@ -522,7 +526,8 @@ type Stmt struct {
 	conn          *Conn
 	stmt          *C.sqlite3_stmt
 	query         string
-	bindNames     map[string]int
+	bindNames     []string
+	bindIndex     map[string]int
 	colNames      map[string]int
 	bindErr       error
 	prepInterrupt bool // set if Prep was interrupted
@@ -676,7 +681,7 @@ func (stmt *Stmt) step() (bool, error) {
 			return true, nil
 		case C.SQLITE_DONE:
 			return false, nil
-		case C.SQLITE_INTERRUPT, C.SQLITE_CONSTRAINT:
+		case C.SQLITE_INTERRUPT:
 			// TODO: embed some of these errors into the stmt for zero-alloc errors?
 			return false, stmt.conn.reserr("Stmt.Step", stmt.query, res)
 		default:
@@ -692,7 +697,7 @@ func (stmt *Stmt) handleBindErr(loc string, res C.int) {
 }
 
 func (stmt *Stmt) findBindName(loc string, param string) int {
-	pos := stmt.bindNames[param]
+	pos := stmt.bindIndex[param]
 	if pos == 0 && stmt.bindErr == nil {
 		stmt.bindErr = reserr("Stmt."+loc, stmt.query, "unknown parameter: "+param, C.SQLITE_ERROR)
 	}
@@ -730,7 +735,21 @@ func (stmt *Stmt) BindParamCount() int {
 	if stmt.stmt == nil {
 		return 0
 	}
-	return int(C.sqlite3_bind_parameter_count(stmt.stmt))
+	return len(stmt.bindNames)
+}
+
+// BindParamName returns the name of parameter or the empty string if the
+// parameter is nameless or i is out of range.
+//
+// Parameters indices start at 1.
+//
+// https://www.sqlite.org/c3ref/bind_parameter_name.html
+func (stmt *Stmt) BindParamName(param int) string {
+	param-- // map from 1-based to 0-based
+	if param < 0 || param >= len(stmt.bindNames) {
+		return ""
+	}
+	return stmt.bindNames[param]
 }
 
 // BindInt64 binds value to a numbered stmt parameter.
@@ -765,6 +784,8 @@ func (stmt *Stmt) BindBool(param int, value bool) {
 
 // BindBytes binds value to a numbered stmt parameter.
 //
+// If value is a nil slice, an SQL NULL value will be bound.
+//
 // In-memory copies of value are made using this interface.
 // For large blobs, consider using the streaming Blob object.
 //
@@ -775,12 +796,17 @@ func (stmt *Stmt) BindBytes(param int, value []byte) {
 	if stmt.stmt == nil {
 		return
 	}
-	var v *C.char
-	if len(value) != 0 {
-		v = (*C.char)(unsafe.Pointer(&value[0]))
+	var res C.int
+	switch {
+	case value == nil:
+		res = C.sqlite3_bind_null(stmt.stmt, C.int(param))
+	case len(value) == 0:
+		res = C.sqlite3_bind_zeroblob(stmt.stmt, C.int(param), C.int(0))
+	default:
+		v := (*C.uchar)(unsafe.Pointer(&value[0]))
+		res = C.transient_bind_blob(stmt.stmt, C.int(param), v, C.int(len(value)))
+		runtime.KeepAlive(value) // Ensure that value is not GC'd during the above C call.
 	}
-	res := C.transient_bind_text(stmt.stmt, C.int(param), v, C.int(len(value)))
-	runtime.KeepAlive(value)
 	stmt.handleBindErr("BindBytes", res)
 }
 
@@ -833,7 +859,8 @@ func (stmt *Stmt) BindNull(param int) {
 	stmt.handleBindErr("BindNull", res)
 }
 
-// BindNull binds a blob of zeros of length len to a numbered stmt parameter.
+// BindZeroBlob binds a blob of zeros of length len to a numbered stmt
+// parameter.
 //
 // Parameter indices start at 1.
 //
@@ -857,6 +884,9 @@ func (stmt *Stmt) SetBool(param string, value bool) {
 }
 
 // SetBytes binds bytes to a parameter using a column name.
+//
+// If value is a nil slice, an SQL NULL value will be bound.
+//
 // An invalid parameter name will cause the call to Step to return an error.
 func (stmt *Stmt) SetBytes(param string, value []byte) {
 	stmt.BindBytes(stmt.findBindName("SetBytes", param), value)
@@ -1052,6 +1082,15 @@ func (stmt *Stmt) ColumnIndex(colName string) int {
 		return -1
 	}
 	return col
+}
+
+// GetType returns a query result type for colName
+func (stmt *Stmt) GetType(colName string) ColumnType {
+	col, found := stmt.colNames[colName]
+	if !found {
+		return SQLITE_NULL
+	}
+	return stmt.ColumnType(col)
 }
 
 // GetInt64 returns a query result value for colName as an int64.

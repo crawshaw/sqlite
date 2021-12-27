@@ -59,6 +59,7 @@ type Pool struct {
 }
 
 // Open opens a fixed-size pool of SQLite connections.
+//
 // A flags value of 0 defaults to:
 //
 //	SQLITE_OPEN_READWRITE
@@ -67,6 +68,28 @@ type Pool struct {
 //	SQLITE_OPEN_URI
 //	SQLITE_OPEN_NOMUTEX
 func Open(uri string, flags sqlite.OpenFlags, poolSize int) (pool *Pool, err error) {
+	return OpenInit(nil, uri, flags, poolSize, "")
+}
+
+// OpenInit opens a fixed-size pool of SQLite connections, each initialized
+// with initScript.
+//
+// A flags value of 0 defaults to:
+//
+//	SQLITE_OPEN_READWRITE
+//	SQLITE_OPEN_CREATE
+//	SQLITE_OPEN_WAL
+//	SQLITE_OPEN_URI
+//	SQLITE_OPEN_NOMUTEX
+//
+// Each initScript is run an all Conns in the Pool. This is intended for PRAGMA
+// or CREATE TEMP VIEW which need to be run on all connections.
+//
+// WARNING: Ensure all queries in initScript are completely idempotent, meaning
+// that running it multiple times is the same as running it once. For example
+// do not run INSERT in any of the initScripts or else it may create duplicate
+// data unintentionally or fail.
+func OpenInit(ctx context.Context, uri string, flags sqlite.OpenFlags, poolSize int, initScript string) (pool *Pool, err error) {
 	if uri == ":memory:" {
 		return nil, strerror{msg: `sqlite: ":memory:" does not work with multiple connections, use "file::memory:?mode=memory"`}
 	}
@@ -103,6 +126,14 @@ func Open(uri string, flags sqlite.OpenFlags, poolSize int) (pool *Pool, err err
 		}
 		p.free <- conn
 		p.all[conn] = func() {}
+
+		if initScript != "" {
+			conn.SetInterrupt(ctx.Done())
+			if err := ExecScript(conn, initScript); err != nil {
+				return nil, err
+			}
+			conn.SetInterrupt(nil)
+		}
 	}
 
 	return p, nil
@@ -129,6 +160,7 @@ func (p *Pool) Get(ctx context.Context) *sqlite.Conn {
 	var cancel context.CancelFunc
 	ctx, cancel = context.WithCancel(ctx)
 
+outer:
 	select {
 	case conn := <-p.free:
 		p.mu.Lock()
@@ -137,7 +169,7 @@ func (p *Pool) Get(ctx context.Context) *sqlite.Conn {
 		select {
 		case <-p.closed:
 			p.free <- conn
-			break
+			break outer
 		default:
 		}
 
@@ -186,7 +218,10 @@ func (p *Pool) Put(conn *sqlite.Conn) {
 	p.free <- conn
 }
 
-// PoolCloseTimeout is the
+// PoolCloseTimeout is the maximum time for Pool.Close to wait for all Conns to
+// be returned to the Pool.
+//
+// Do not modify this concurrently with calling Pool.Close.
 var PoolCloseTimeout = 5 * time.Second
 
 // Close interrupts and closes all the connections in the Pool.

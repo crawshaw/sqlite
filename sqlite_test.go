@@ -15,11 +15,14 @@
 package sqlite_test
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"io/ioutil"
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -102,9 +105,15 @@ func TestConn(t *testing.T) {
 		if typ != sqlite.SQLITE_TEXT {
 			t.Errorf(`ColumnType(0)=%q, want %q`, typ, sqlite.SQLITE_TEXT)
 		}
+		if getType := stmt.GetType("foo1"); getType != typ {
+			t.Errorf(`GetType("foo1")=%q, want %q`, getType, typ)
+		}
 		intTyp := stmt.ColumnType(1)
 		if intTyp != sqlite.SQLITE_INTEGER {
 			t.Errorf(`ColumnType(1)=%q, want %q`, intTyp, sqlite.SQLITE_INTEGER)
+		}
+		if getIntType := stmt.GetType("foo2"); getIntType != intTyp {
+			t.Errorf(`GetType("foo2")=%q, want %q`, getIntType, intTyp)
 		}
 		gotVals = append(gotVals, val)
 		gotInts = append(gotInts, intVal)
@@ -366,6 +375,95 @@ func TestParallel(t *testing.T) {
 }
 
 func TestBindBytes(t *testing.T) {
+	tests := []struct {
+		name     string
+		val      []byte
+		wantNull bool
+	}{
+		{
+			name: "Data with NUL bytes",
+			val:  []byte("\x00\x00hello world\x00\x00\x00"),
+		},
+		{
+			name: "Empty non-nil slice",
+			val:  []byte{},
+		},
+		{
+			name:     "Nil slice stores NULL",
+			wantNull: true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			c, err := sqlite.OpenConn(":memory:", 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				if err := c.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
+
+			stmt := c.Prep("CREATE TABLE IF NOT EXISTS bindbytes (c);")
+			if _, err := stmt.Step(); err != nil {
+				t.Fatal(err)
+			}
+			stmt = c.Prep("INSERT INTO bindbytes (c) VALUES ($bytes);")
+			stmt.SetBytes("$bytes", test.val)
+			if _, err := stmt.Step(); err != nil {
+				t.Fatal(err)
+			}
+
+			if !test.wantNull {
+				stmt = c.Prep("SELECT count(*) FROM bindbytes WHERE c = $bytes;")
+				stmt.SetBytes("$bytes", test.val)
+			} else {
+				stmt = c.Prep("SELECT count(*) FROM bindbytes WHERE c IS NULL")
+			}
+			if hasRow, err := stmt.Step(); err != nil {
+				t.Fatal(err)
+			} else if !hasRow {
+				t.Error("SetBytes: result has no row")
+			}
+			if got := stmt.ColumnInt(0); got != 1 {
+				t.Errorf("SetBytes: count is %d, want 1", got)
+			}
+
+			stmt.Reset()
+
+			if test.wantNull {
+				// Skip blob test, won't work with a NULL value
+				return
+			}
+
+			blob, err := c.OpenBlob("", "bindbytes", "c", 1, false)
+			if err != nil {
+				t.Fatalf("SetBytes: OpenBlob: %v", err)
+			}
+			defer func() {
+				if err := blob.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
+
+			wantEOF := (len(test.val) == 0)
+			storedVal := make([]byte, len(test.val)+8)
+			n, err := blob.Read(storedVal)
+			if err != nil && (!wantEOF || err != io.EOF) {
+				t.Fatalf("SetBytes: Read: %v", err)
+			}
+			if got := (err == io.EOF); got != wantEOF {
+				t.Fatalf("SetBytes: Read: got EOF? %t, want %t", got, wantEOF)
+			}
+			if !bytes.Equal(test.val, storedVal[:n]) {
+				t.Fatalf("SetBytes: want: %x, got: %x", test.val, storedVal)
+			}
+		})
+	}
+}
+
+func TestBindText(t *testing.T) {
 	c, err := sqlite.OpenConn(":memory:", 0)
 	if err != nil {
 		t.Fatal(err)
@@ -376,18 +474,20 @@ func TestBindBytes(t *testing.T) {
 		}
 	}()
 
-	stmt := c.Prep("CREATE TABLE IF NOT EXISTS bindbytes (c);")
+	const val = "column_value"
+
+	stmt := c.Prep("CREATE TABLE IF NOT EXISTS bindtext (c);")
 	if _, err := stmt.Step(); err != nil {
 		t.Fatal(err)
 	}
-	stmt = c.Prep("INSERT INTO bindbytes (c) VALUES ($bytes);")
-	stmt.SetText("$bytes", "column_value")
+	stmt = c.Prep("INSERT INTO bindtext (c) VALUES ($text);")
+	stmt.SetText("$text", val)
 	if _, err := stmt.Step(); err != nil {
 		t.Fatal(err)
 	}
 
-	stmt = c.Prep("SELECT count(*) FROM bindbytes WHERE c = $bytes;")
-	stmt.SetText("$bytes", "column_value")
+	stmt = c.Prep("SELECT count(*) FROM bindtext WHERE c = $text;")
+	stmt.SetText("$text", val)
 	if hasRow, err := stmt.Step(); err != nil {
 		t.Fatal(err)
 	} else if !hasRow {
@@ -399,14 +499,14 @@ func TestBindBytes(t *testing.T) {
 
 	stmt.Reset()
 
-	stmt.SetBytes("$bytes", []byte("column_value"))
+	stmt.SetText("$text", val)
 	if hasRow, err := stmt.Step(); err != nil {
 		t.Fatal(err)
 	} else if !hasRow {
-		t.Error("SetBytes: result has no row")
+		t.Error("SetText: result has no row")
 	}
 	if got := stmt.ColumnInt(0); got != 1 {
-		t.Errorf("SetBytes: count is %d, want 1", got)
+		t.Errorf("SetText: count is %d, want 1", got)
 	}
 }
 
@@ -674,6 +774,35 @@ func TestColumnIndex(t *testing.T) {
 	stmt.Finalize()
 }
 
+func TestBindParamName(t *testing.T) {
+	c, err := sqlite.OpenConn(":memory:", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := c.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+
+	stmt, err := c.Prepare("SELECT :foo, :bar;")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stmt.Finalize()
+
+	var got []string
+	for i, n := 1, stmt.BindParamCount(); i <= n; i++ {
+		got = append(got, stmt.BindParamName(i))
+	}
+	// We don't care what indices SQLite picked, so sort returned names.
+	sort.Strings(got)
+	want := []string{":bar", ":foo"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("names = %q; want %q", got, want)
+	}
+}
+
 func TestLimit(t *testing.T) {
 	c, err := sqlite.OpenConn(":memory:", 0)
 	if err != nil {
@@ -693,5 +822,45 @@ func TestLimit(t *testing.T) {
 	}
 	if got, want := sqlite.ErrCode(err), sqlite.SQLITE_TOOBIG; got != want {
 		t.Errorf("sqlite.ErrCode(err) = %v; want %v", got, want)
+	}
+}
+
+func TestReturningClause(t *testing.T) {
+	// The RETURNING syntax has been supported by SQLite since version 3.35.0 (2021-03-12).
+	// https://www.sqlite.org/lang_returning.html
+	c, err := sqlite.OpenConn(":memory:", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := c.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+
+	stmt := c.Prep(`
+		CREATE TABLE fruits (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT NOT NULL
+		)
+	`)
+	if _, err = stmt.Step(); err != nil {
+		t.Fatal(err)
+	}
+	_ = stmt.Finalize()
+
+	stmt = c.Prep(`
+		INSERT INTO fruits (name)
+		VALUES (:fruit)
+		RETURNING id
+	`)
+	stmt.SetText(":fruit", "bananananana")
+	if ok, err := stmt.Step(); err != nil {
+		t.Fatal(err)
+	} else if !ok {
+		t.Fatal("no fruit id returned")
+	}
+	if id := stmt.GetInt64("id"); id != 1 {
+		t.Fatalf("want returned fruit id to be 1, got %d", id)
 	}
 }
