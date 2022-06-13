@@ -16,6 +16,7 @@ package sqlite
 
 // // !!! UPDATE THE Makefile WITH THESE DEFINES !!!
 // #cgo CFLAGS: -DSQLITE_THREADSAFE=2
+// #cgo CFLAGS: -DSQLITE_ENABLE_DBSTAT_VTAB=1
 // #cgo CFLAGS: -DSQLITE_DEFAULT_WAL_SYNCHRONOUS=1
 // #cgo CFLAGS: -DSQLITE_ENABLE_UNLOCK_NOTIFY
 // #cgo CFLAGS: -DSQLITE_ENABLE_FTS5
@@ -169,7 +170,6 @@ func openConn(path string, flags ...OpenFlags) (*Conn, error) {
 			return nil, err
 		}
 	}
-
 
 	return conn, nil
 }
