@@ -17,6 +17,7 @@ package sqlite_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"io/ioutil"
 	"os"
@@ -862,5 +863,31 @@ func TestReturningClause(t *testing.T) {
 	}
 	if id := stmt.GetInt64("id"); id != 1 {
 		t.Fatalf("want returned fruit id to be 1, got %d", id)
+	}
+}
+
+// See https://github.com/crawshaw/sqlite/issues/119 and
+// https://github.com/zombiezen/go-sqlite/issues/14
+func TestConnWALClose(t *testing.T) {
+	dbName := filepath.Join(t.TempDir(), "wal-close.db")
+	conn, err := sqlite.OpenConn(dbName, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	conn.SetInterrupt(done)
+	err = sqlitex.ExecTransient(conn, `CREATE TABLE foo (id integer primary key);`, nil)
+	if err != nil {
+		t.Error(err)
+	}
+	if _, err := os.Stat(dbName + "-wal"); err != nil {
+		t.Error(err)
+	}
+	close(done)
+	if err := conn.Close(); err != nil {
+		t.Error(err)
+	}
+	if _, err := os.Stat(dbName + "-wal"); !errors.Is(err, os.ErrNotExist) {
+		t.Error("wal file should not exist after close")
 	}
 }

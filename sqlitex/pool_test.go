@@ -16,6 +16,7 @@ package sqlitex_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -301,4 +302,31 @@ func TestPoolOpenInit(t *testing.T) {
 		}
 		t.Fatal("a cancelled context should interrupt initialization")
 	})
+}
+
+// See https://github.com/crawshaw/sqlite/issues/119 and
+// https://github.com/zombiezen/go-sqlite/issues/14
+func TestPoolWALClose(t *testing.T) {
+	dbName := filepath.Join(t.TempDir(), "wal-close.db")
+	pool, err := sqlitex.Open(dbName, 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	conn := pool.Get(ctx)
+	if _, err := os.Stat(dbName + "-wal"); err != nil {
+		t.Error(err)
+	}
+	err = sqlitex.ExecTransient(conn, `CREATE TABLE foo (id integer primary key);`, nil)
+	if err != nil {
+		t.Error(err)
+	}
+	cancel()
+	pool.Put(conn)
+	if err := pool.Close(); err != nil {
+		t.Error(err)
+	}
+	if _, err := os.Stat(dbName + "-wal"); !errors.Is(err, os.ErrNotExist) {
+		t.Error("wal file should not exist after close")
+	}
 }
