@@ -910,7 +910,7 @@ func BenchmarkPrepareTransientAndFinalize(b *testing.B) {
 	}
 }
 
-func BenchmarkPrepare(b *testing.B) {
+func BenchmarkPreparePrimed(b *testing.B) {
 	benchs := []struct {
 		name  string
 		query string

@@ -369,10 +369,10 @@ func (conn *Conn) Prep(query string) *Stmt {
 // https://www.sqlite.org/c3ref/prepare.html
 func (conn *Conn) Prepare(query string) (*Stmt, error) {
 	if stmt := conn.stmts[query]; stmt != nil {
-		if err := stmt.Reset(); err != nil {
+		if err := stmt.resetIfStepped(); err != nil {
 			return nil, err
 		}
-		if err := stmt.ClearBindings(); err != nil {
+		if err := stmt.clearBindingsIfNeeded(); err != nil {
 			return nil, err
 		}
 		if conn.tracer != nil {
@@ -532,6 +532,8 @@ type Stmt struct {
 	bindErr       error
 	prepInterrupt bool // set if Prep was interrupted
 	lastHasRow    bool // last bool returned by Step
+	stepped       bool // Step has been called more recently than Reset
+	hasBindings   bool // has at least one non-NULL binding
 	tracerTask    TracerTask
 }
 
@@ -584,7 +586,17 @@ func (stmt *Stmt) Reset() error {
 			return stmt.conn.extreserr("Stmt.Reset(Wait)", stmt.query, res)
 		}
 	}
+	if res == C.SQLITE_OK {
+		stmt.stepped = false
+	}
 	return stmt.conn.extreserr("Stmt.Reset", stmt.query, res)
+}
+
+func (stmt *Stmt) resetIfStepped() error {
+	if !stmt.stepped {
+		return nil
+	}
+	return stmt.Reset()
 }
 
 // ClearBindings clears all bound parameter values on a statement.
@@ -597,6 +609,13 @@ func (stmt *Stmt) ClearBindings() error {
 	}
 	res := C.sqlite3_clear_bindings(stmt.stmt)
 	return stmt.conn.reserr("Stmt.ClearBindings", stmt.query, res)
+}
+
+func (stmt *Stmt) clearBindingsIfNeeded() error {
+	if !stmt.hasBindings {
+		return nil
+	}
+	return stmt.ClearBindings()
 }
 
 // Step moves through the statement cursor using sqlite3_step.
@@ -651,8 +670,10 @@ func (stmt *Stmt) Step() (rowReturned bool, err error) {
 			stmt.tracerTask = nil
 		}
 	}
+	stmt.stepped = true
 	if err != nil {
 		C.sqlite3_reset(stmt.stmt)
+		stmt.stepped = false
 	}
 	stmt.lastHasRow = rowReturned
 	return rowReturned, err
@@ -702,6 +723,12 @@ func (stmt *Stmt) findBindName(loc string, param string) int {
 		stmt.bindErr = reserr("Stmt."+loc, stmt.query, "unknown parameter: "+param, C.SQLITE_ERROR)
 	}
 	return pos
+}
+
+func (stmt *Stmt) setHasBindings(res C.int) {
+	if res == C.SQLITE_OK {
+		stmt.hasBindings = true
+	}
 }
 
 // DataCount returns the number of columns in the current row of the result
@@ -763,6 +790,7 @@ func (stmt *Stmt) BindInt64(param int, value int64) {
 	}
 	res := C.sqlite3_bind_int64(stmt.stmt, C.int(param), C.sqlite3_int64(value))
 	stmt.handleBindErr("BindInt64", res)
+	stmt.setHasBindings(res)
 }
 
 // BindBool binds value (as an integer 0 or 1) to a numbered stmt parameter.
@@ -780,6 +808,7 @@ func (stmt *Stmt) BindBool(param int, value bool) {
 	}
 	res := C.sqlite3_bind_int64(stmt.stmt, C.int(param), C.sqlite3_int64(v))
 	stmt.handleBindErr("BindBool", res)
+	stmt.setHasBindings(res)
 }
 
 // BindBytes binds value to a numbered stmt parameter.
@@ -808,6 +837,7 @@ func (stmt *Stmt) BindBytes(param int, value []byte) {
 		runtime.KeepAlive(value) // Ensure that value is not GC'd during the above C call.
 	}
 	stmt.handleBindErr("BindBytes", res)
+	stmt.setHasBindings(res)
 }
 
 var emptyCstr = C.CString("")
@@ -831,6 +861,7 @@ func (stmt *Stmt) BindText(param int, value string) {
 	}
 	res := C.sqlite3_bind_text(stmt.stmt, C.int(param), v, C.int(len(value)), free)
 	stmt.handleBindErr("BindText", res)
+	stmt.setHasBindings(res)
 }
 
 // BindFloat binds value to a numbered stmt parameter.
@@ -844,6 +875,7 @@ func (stmt *Stmt) BindFloat(param int, value float64) {
 	}
 	res := C.sqlite3_bind_double(stmt.stmt, C.int(param), C.double(value))
 	stmt.handleBindErr("BindFloat", res)
+	stmt.setHasBindings(res)
 }
 
 // BindNull binds an SQL NULL value to a numbered stmt parameter.
@@ -857,6 +889,7 @@ func (stmt *Stmt) BindNull(param int) {
 	}
 	res := C.sqlite3_bind_null(stmt.stmt, C.int(param))
 	stmt.handleBindErr("BindNull", res)
+	stmt.setHasBindings(res)
 }
 
 // BindZeroBlob binds a blob of zeros of length len to a numbered stmt
@@ -871,6 +904,7 @@ func (stmt *Stmt) BindZeroBlob(param int, len int64) {
 	}
 	res := C.sqlite3_bind_zeroblob64(stmt.stmt, C.int(param), C.sqlite3_uint64(len))
 	stmt.handleBindErr("BindZeroBlob", res)
+	stmt.setHasBindings(res)
 }
 
 // SetInt64 binds an int64 to a parameter using a column name.
