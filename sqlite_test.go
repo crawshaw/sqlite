@@ -42,20 +42,7 @@ func TestConn(t *testing.T) {
 		}
 	}()
 
-	stmt, _, err := c.PrepareTransient("CREATE TABLE bartable (foo1 string, foo2 integer);")
-	if err != nil {
-		t.Fatal(err)
-	}
-	hasRow, err := stmt.Step()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if hasRow {
-		t.Errorf("CREATE TABLE reports having a row")
-	}
-	if err := stmt.Finalize(); err != nil {
-		t.Error(err)
-	}
+	mustCreateBarTable(t, c)
 
 	fooVals := []string{
 		"bar",
@@ -70,7 +57,7 @@ func TestConn(t *testing.T) {
 		}
 		stmt.SetText("$f1", val)
 		stmt.SetInt64("$f2", int64(i))
-		hasRow, err = stmt.Step()
+		hasRow, err := stmt.Step()
 		if err != nil {
 			t.Errorf("INSERT %q: %v", val, err)
 		}
@@ -79,7 +66,7 @@ func TestConn(t *testing.T) {
 		}
 	}
 
-	stmt, err = c.Prepare("SELECT foo1, foo2 FROM bartable;")
+	stmt, err := c.Prepare("SELECT foo1, foo2 FROM bartable;")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,6 +116,23 @@ func TestConn(t *testing.T) {
 	}
 }
 
+func mustCreateBarTable(tb testing.TB, c *sqlite.Conn) {
+	tb.Helper()
+
+	stmt, _, err := c.PrepareTransient("CREATE TABLE bartable (foo1 string, foo2 integer);")
+	if err != nil {
+		tb.Fatal(err)
+	}
+	if hasRow, err := stmt.Step(); err != nil {
+		tb.Fatal(err)
+	} else if hasRow {
+		tb.Fatal("CREATE TABLE reports having a row")
+	}
+	if err := stmt.Finalize(); err != nil {
+		tb.Fatal(err)
+	}
+}
+
 func TestEarlyInterrupt(t *testing.T) {
 	c, err := sqlite.OpenConn(":memory:", 0)
 	if err != nil {
@@ -143,18 +147,11 @@ func TestEarlyInterrupt(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	c.SetInterrupt(ctx.Done())
 
-	stmt, _, err := c.PrepareTransient("CREATE TABLE bartable (foo1 string, foo2 integer);")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := stmt.Step(); err != nil {
-		t.Fatal(err)
-	}
-	stmt.Finalize()
+	mustCreateBarTable(t, c)
 
 	cancel()
 
-	stmt, err = c.Prepare("INSERT INTO bartable (foo1, foo2) VALUES ($f1, $f2);")
+	_, err = c.Prepare("INSERT INTO bartable (foo1, foo2) VALUES ($f1, $f2);")
 	if err == nil {
 		t.Fatal("Prepare err=nil, want prepare to fail")
 	}
@@ -864,3 +861,236 @@ func TestReturningClause(t *testing.T) {
 		t.Fatalf("want returned fruit id to be 1, got %d", id)
 	}
 }
+
+func BenchmarkPrepareTransientAndFinalize(b *testing.B) {
+	benchs := []struct {
+		name  string
+		query string
+	}{
+		{
+			name:  "Select constant",
+			query: "SELECT 1",
+		},
+		{
+			name:  "Insert constants",
+			query: "INSERT INTO bartable (foo1, foo2) VALUES ('bar', 0);",
+		},
+		{
+			name:  "Insert with params",
+			query: "INSERT INTO bartable (foo1, foo2) VALUES ($f1, $f2);",
+		},
+	}
+
+	for _, bench := range benchs {
+		b.Run(bench.name, func(b *testing.B) {
+			c, err := sqlite.OpenConn(":memory:", 0)
+			if err != nil {
+				b.Fatal(err)
+			}
+			defer func() {
+				if err := c.Close(); err != nil {
+					b.Error(err)
+				}
+			}()
+
+			mustCreateBarTable(b, c)
+			b.ResetTimer()
+
+			for i := 0; i < b.N; i++ {
+				var err error
+				JunkStmt, JunkInt, err = c.PrepareTransient(bench.query)
+				if err != nil {
+					b.Fatal(err)
+				}
+				if err := JunkStmt.Finalize(); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkPrepare(b *testing.B) {
+	benchs := []struct {
+		name  string
+		query string
+	}{
+		{
+			name:  "Select constant",
+			query: "SELECT 1",
+		},
+		{
+			name:  "Insert constants",
+			query: "INSERT INTO bartable (foo1, foo2) VALUES ('bar', 0);",
+		},
+		{
+			name:  "Insert with params",
+			query: "INSERT INTO bartable (foo1, foo2) VALUES ($f1, $f2);",
+		},
+	}
+
+	for _, bench := range benchs {
+		b.Run(bench.name, func(b *testing.B) {
+			c, err := sqlite.OpenConn(":memory:", 0)
+			if err != nil {
+				b.Fatal(err)
+			}
+			defer func() {
+				if err := c.Close(); err != nil {
+					b.Error(err)
+				}
+			}()
+
+			mustCreateBarTable(b, c)
+
+			if _, err := c.Prepare(bench.query); err != nil {
+				b.Fatalf("Unable to prime Prepare cache with %q: %v", bench.query, err)
+			}
+			b.ResetTimer()
+
+			for i := 0; i < b.N; i++ {
+				var err error
+				JunkStmt, err = c.Prepare(bench.query)
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkPrepareBindAndSelect(b *testing.B) {
+	const (
+		existingText = "bar"
+		existingInt  = 42
+	)
+	benchs := []struct {
+		name     string
+		query    string
+		bindInt  bool
+		i        int64
+		bindText bool
+		s        string
+		doReset  bool
+		doClear  bool
+	}{
+		{
+			name:  "Select constant",
+			query: "SELECT 18",
+		},
+		{
+			name:    "Select constant, explicit reset",
+			query:   "SELECT 18",
+			doReset: true,
+		},
+		{
+			name:    "Select int param directly",
+			query:   "SELECT $f1",
+			bindInt: true,
+			i:       existingInt,
+		},
+		{
+			name:    "Select int param directly, explicit reset",
+			query:   "SELECT $f1",
+			bindInt: true,
+			i:       existingInt,
+			doReset: true,
+		},
+		{
+			name:     "Select from table",
+			query:    "SELECT foo2 FROM bartable WHERE foo1=$f1",
+			bindText: true,
+			s:        existingText,
+		},
+		{
+			name:     "Select from table, explicit reset and clear",
+			query:    "SELECT foo2 FROM bartable WHERE foo1=$f1",
+			bindText: true,
+			s:        existingText,
+			doReset:  true,
+			doClear:  true,
+		},
+	}
+
+	for _, bench := range benchs {
+		b.Run(bench.name, func(b *testing.B) {
+			c, err := sqlite.OpenConn(":memory:", 0)
+			if err != nil {
+				b.Fatal(err)
+			}
+			defer func() {
+				if err := c.Close(); err != nil {
+					b.Error(err)
+				}
+			}()
+
+			mustCreateBarTable(b, c)
+			mustInsertIntoBarTable(b, c, existingText, existingInt)
+
+			if _, err := c.Prepare(bench.query); err != nil {
+				b.Fatalf("Unable to prime Prepare cache with %q: %v", bench.query, err)
+			}
+			b.ResetTimer()
+
+			for i := 0; i < b.N; i++ {
+				stmt, err := c.Prepare(bench.query)
+				if err != nil {
+					b.Fatal(err)
+				}
+
+				if bench.bindInt {
+					stmt.SetInt64("$f1", bench.i)
+				} else if bench.bindText {
+					stmt.SetText("$f1", bench.s)
+				}
+
+				if hasRow, err := stmt.Step(); err != nil {
+					b.Fatal(err)
+				} else if !hasRow {
+					b.Fatal("No rows")
+				}
+				JunkInt64 = stmt.ColumnInt64(0)
+
+				if bench.doReset {
+					if err := stmt.Reset(); err != nil {
+						b.Fatal(err)
+					}
+				}
+				if bench.doClear {
+					if err := stmt.ClearBindings(); err != nil {
+						b.Fatal(err)
+					}
+				}
+			}
+		})
+	}
+}
+
+func mustInsertIntoBarTable(tb testing.TB, c *sqlite.Conn, s string, i int64) {
+	tb.Helper()
+
+	stmt, _, err := c.PrepareTransient("INSERT INTO bartable (foo1, foo2) VALUES ($f1, $f2);")
+	if err != nil {
+		tb.Fatal(err)
+	}
+	defer func() {
+		if err := stmt.Finalize(); err != nil {
+			tb.Fatal(err)
+		}
+	}()
+
+	stmt.SetText("$f1", s)
+	stmt.SetInt64("$f2", i)
+	if hasRow, err := stmt.Step(); err != nil {
+		tb.Fatalf("INSERT %q, %d: %v", s, i, err)
+	} else if hasRow {
+		tb.Fatalf("INSERT %q, %d: has row", s, i)
+	}
+}
+
+// Variables set by benchmarks, to ensure things aren't optimized away
+var (
+	JunkStmt  *sqlite.Stmt
+	JunkInt   int
+	JunkInt64 int64
+)
