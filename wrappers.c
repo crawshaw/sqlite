@@ -18,7 +18,7 @@
 #include <stdlib.h>
 #include <sqlite3.h>
 
-void cfree(void *p) {
+void sqlitego_free(void *p) {
         free(p);
 };
 
