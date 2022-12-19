@@ -827,7 +827,7 @@ func (stmt *Stmt) BindText(param int, value string) {
 		v = emptyCstr
 	} else {
 		v = C.CString(value)
-		free = (*[0]byte)(C.cfree)
+		free = (*[0]byte)(C.sqlitego_free)
 	}
 	res := C.sqlite3_bind_text(stmt.stmt, C.int(param), v, C.int(len(value)), free)
 	stmt.handleBindErr("BindText", res)

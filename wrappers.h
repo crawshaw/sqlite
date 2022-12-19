@@ -17,8 +17,8 @@
 #ifndef WRAPPERS_H
 #define WRAPPERS_H
 
-/* cfree wraps free to fix https://github.com/crawshaw/sqlite/issues/60 */
-void cfree(void *p);
+/* wraps free to fix https://github.com/crawshaw/sqlite/issues/60 */
+void sqlitego_free(void *p);
 
 int c_strm_w_tramp(void*, const void*, int);
 int c_strm_r_tramp(void*, const void*, int*);
