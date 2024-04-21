@@ -19,9 +19,6 @@ package sqlite
 // #include <sqlite3.h>
 // #include "wrappers.h"
 //
-// extern int go_strm_w_tramp(uintptr_t, char*, int);
-// extern int go_strm_r_tramp(uintptr_t, char*, int*);
-//
 // static int go_sqlite3session_changeset_strm(
 //   sqlite3_session *pSession,
 //   int (*xOutput)(void *pOut, const void *pData, int nData),

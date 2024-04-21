@@ -19,10 +19,6 @@ package sqlite
 // #include <sqlite3.h>
 // #include "wrappers.h"
 //
-// extern void func_tramp(sqlite3_context*, int, sqlite3_value**);
-// extern void step_tramp(sqlite3_context*, int, sqlite3_value**);
-// extern void final_tramp(sqlite3_context*);
-//
 // static int go_sqlite3_create_function_v2(
 //   sqlite3 *db,
 //   const char *zFunctionName,
@@ -167,10 +163,10 @@ func (conn *Conn) CreateFunction(name string, deterministic bool, numArgs int, x
 
 	var funcfn, stepfn, finalfn *[0]byte
 	if xFunc == nil {
-		stepfn = (*[0]byte)(C.step_tramp)
-		finalfn = (*[0]byte)(C.final_tramp)
+		stepfn = (*[0]byte)(C.c_step_tramp)
+		finalfn = (*[0]byte)(C.c_final_tramp)
 	} else {
-		funcfn = (*[0]byte)(C.func_tramp)
+		funcfn = (*[0]byte)(C.c_func_tramp)
 	}
 
 	res := C.go_sqlite3_create_function_v2(
@@ -197,8 +193,8 @@ func getxfuncs(ctx *C.sqlite3_context) *xfunc {
 	return x
 }
 
-//export func_tramp
-func func_tramp(ctx *C.sqlite3_context, n C.int, valarray **C.sqlite3_value) {
+//export go_func_tramp
+func go_func_tramp(ctx *C.sqlite3_context, n C.int, valarray **C.sqlite3_value) {
 	x := getxfuncs(ctx)
 	var vals []Value
 	if n > 0 {
@@ -207,8 +203,8 @@ func func_tramp(ctx *C.sqlite3_context, n C.int, valarray **C.sqlite3_value) {
 	x.xFunc(Context{ptr: ctx}, vals...)
 }
 
-//export step_tramp
-func step_tramp(ctx *C.sqlite3_context, n C.int, valarray **C.sqlite3_value) {
+//export go_step_tramp
+func go_step_tramp(ctx *C.sqlite3_context, n C.int, valarray **C.sqlite3_value) {
 	x := getxfuncs(ctx)
 	var vals []Value
 	if n > 0 {
@@ -217,8 +213,8 @@ func step_tramp(ctx *C.sqlite3_context, n C.int, valarray **C.sqlite3_value) {
 	x.xStep(Context{ptr: ctx}, vals...)
 }
 
-//export final_tramp
-func final_tramp(ctx *C.sqlite3_context) {
+//export go_final_tramp
+func go_final_tramp(ctx *C.sqlite3_context) {
 	x := getxfuncs(ctx)
 	x.xFinal(Context{ptr: ctx})
 }

@@ -52,9 +52,8 @@ package sqlite
 //	return sqlite3_bind_blob(stmt, col, p, n, SQLITE_TRANSIENT);
 // }
 //
-// extern void log_fn(void* pArg, int code, char* msg);
 // static void enable_logging() {
-//	sqlite3_config(SQLITE_CONFIG_LOG, log_fn, NULL);
+//	sqlite3_config(SQLITE_CONFIG_LOG, c_log_fn, NULL);
 // }
 //
 // static int db_config_onoff(sqlite3* db, int op, int onoff) {
@@ -169,7 +168,6 @@ func openConn(path string, flags ...OpenFlags) (*Conn, error) {
 			return nil, err
 		}
 	}
-
 
 	return conn, nil
 }
@@ -1224,8 +1222,8 @@ func sqliteInitFn() {
 	}
 }
 
-//export log_fn
-func log_fn(_ unsafe.Pointer, code C.int, msg *C.char) {
+//export go_log_fn
+func go_log_fn(_ unsafe.Pointer, code C.int, msg *C.char) {
 	var msgBytes []byte
 	if msg != nil {
 		str := C.GoString(msg) // TODO: do not copy msg.

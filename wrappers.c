@@ -42,8 +42,32 @@ int c_xapply_filter_tramp(void* pCtx, const char* zTab) {
         return go_xapply_filter_tramp((uintptr_t)pCtx, (char*)zTab);
 }
 
+extern void go_func_tramp(sqlite3_context*, int, sqlite3_value**);
+void c_func_tramp(sqlite3_context* ctx, int n, sqlite3_value** valarray) {
+        return go_func_tramp(ctx, n, valarray);
+}
+
+extern void go_step_tramp(sqlite3_context*, int, sqlite3_value**);
+void c_step_tramp(sqlite3_context* ctx, int n, sqlite3_value** valarray) {
+        return go_step_tramp(ctx, n, valarray);
+}
+
+extern void go_final_tramp(sqlite3_context*);
+void c_final_tramp(sqlite3_context* ctx) {
+        return go_final_tramp(ctx);
+}
+
 extern void go_destroy_tramp(uintptr_t);
 void c_destroy_tramp(void* ptr) {
         return go_destroy_tramp((uintptr_t)ptr);
 }
 
+extern int go_sqlite_auth_tramp(uintptr_t, int, char*, char*, char*, char*);
+int c_auth_tramp(void *userData, int action, const char* arg1, const char* arg2, const char* db, const char* trigger) {
+        return go_sqlite_auth_tramp((uintptr_t)userData, action, (char*)arg1, (char*)arg2, (char*)db, (char*)trigger);
+}
+
+extern void go_log_fn(void*, int, char*);
+void c_log_fn(void* pArg, int code, char* msg) {
+        return go_log_fn(pArg, code, msg);
+}

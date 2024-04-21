@@ -53,4 +53,4 @@ https://godoc.org/crawshaw.io/sqlite
 
 ## Platform specific considerations
 
-By default it requires some pthreads DLL on Windows. To avoid it, supply `CGOLDFLAGS="-static"` when building your application.
+By default it requires some pthreads DLL on Windows. To avoid it, supply `CGO_LDFLAGS="-static"` when building your application.

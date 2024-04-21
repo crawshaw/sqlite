@@ -26,6 +26,12 @@ int c_strm_r_tramp(void*, const void*, int*);
 int c_xapply_conflict_tramp(void*, int, sqlite3_changeset_iter*);
 int c_xapply_filter_tramp(void*, const char*);
 
+void c_log_fn(void*, int, char*);
+int c_auth_tramp(void*, int, const char*, const char*, const char*, const char*);
+
+void c_func_tramp(sqlite3_context*, int, sqlite3_value**);
+void c_step_tramp(sqlite3_context*, int, sqlite3_value**);
+void c_final_tramp(sqlite3_context*);
 void c_destroy_tramp(void*);
 
 #endif // WRAPPERS_H
